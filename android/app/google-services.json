@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "639767112265",
+    "firebase_url": "https://thoth-a5c7a-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "thoth-a5c7a",
+    "storage_bucket": "thoth-a5c7a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:639767112265:android:9235ac953e54c7acad2d98",
+        "android_client_info": {
+          "package_name": "com.thoth.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "639767112265-khufqpgkkbi5mae7fqkou891j3t1g2jd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.thoth.app",
+            "certificate_hash": "a94bcc137d8f0d3b8a9e544b267fdd0a2d2b4e6f"
+          }
+        },
+        {
+          "client_id": "639767112265-bedturi5tv013dcd2q2ifmo1j0sv9k2h.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAM3mUjcUnJmfxusAhi2zO7amWAdNGIl4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "639767112265-bedturi5tv013dcd2q2ifmo1j0sv9k2h.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
