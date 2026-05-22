@@ -1301,12 +1301,7 @@ class _EditorTarefaState extends State<_EditorTarefa> {
   static const Color azul = _PomodoroAppState._azul;
   static const Color branco = _PomodoroAppState._branco;
 
-  static const _presets = [
-    {'label': 'G', 'foco': 1800, 'descanso': 600, 'ciclos': 3},
-    {'label': 'A', 'foco': 2700, 'descanso': 900, 'ciclos': 2},
-    {'label': 'M', 'foco': 5400, 'descanso': 1200, 'ciclos': 4},
-    {'label': 'P', 'foco': 3600, 'descanso': 300, 'ciclos': 6},
-  ];
+  static const _presets = [];
 
   static const _legendas = {
     'G': 'Geografia', 'A': 'Arte', 'M': 'Matemática', 'P': 'Prática'
