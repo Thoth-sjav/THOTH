@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Cada utilizador só acede aos seus próprios dados
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /tarefas/{tarefaId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      match /sessoes/{sessaoId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

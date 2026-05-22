@@ -1,0 +1,19 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "tarefas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "criadaEm", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "sessoes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "dataInicio", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

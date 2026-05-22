@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Thoth - Study Helper</title>
+</head>
+<body class="bg-gray-100 font-sans">
+
+  <div class="max-w-md mx-auto bg-white min-h-screen shadow-lg p-6">
+
+    <!-- Header -->
+    <div class="text-center">
+      <h1 class="text-3xl font-bold">Thoth</h1>
+      <p class="text-gray-500">Study helper - Pomodoro</p>
+    </div>
+
+    <!-- Quote -->
+    <div class="mt-6 text-center italic text-gray-600">
+      “A vitória pertence aos mais perseverantes.”
+      <br/>
+      <span class="text-sm">- Napoleão Bonaparte</span>
+    </div>
+
+    <!-- Tasks -->
+    <div class="mt-6">
+      <h2 class="font-semibold text-lg">Tarefas de hoje:</h2>
+      <ul class="mt-2 space-y-2">
+        <li class="bg-gray-200 p-2 rounded">Lavar loiça</li>
+        <li class="bg-gray-200 p-2 rounded">Estudar</li>
+        <li class="bg-gray-200 p-2 rounded">Descansar</li>
+        <li class="bg-gray-200 p-2 rounded">Ler</li>
+        <li class="bg-gray-200 p-2 rounded">Organizar tarefas</li>
+      </ul>
+    </div>
+
+    <!-- Current Task -->
+    <div class="mt-6">
+      <h2 class="font-semibold">Tarefa atual:</h2>
+      <p class="text-xl font-bold mt-2">Foco intenso</p>
+    </div>
+
+    <!-- Timer -->
+    <div class="mt-6 text-center">
+      <div class="text-5xl font-bold">25:00</div>
+      <p class="text-gray-500 mt-1">Tempo de foco</p>
+    </div>
+
+    <!-- Progress -->
+    <div class="mt-6">
+      <h2 class="font-semibold">Progresso:</h2>
+      <div class="w-full bg-gray-300 rounded-full h-4 mt-2">
+        <div class="bg-green-500 h-4 rounded-full" style="width: 67%"></div>
+      </div>
+      <p class="text-right text-sm mt-1">67%</p>
+    </div>
+
+    <!-- Start Button -->
+    <div class="mt-6 text-center">
+      <button class="bg-blue-500 text-white px-6 py-2 rounded-full shadow">
+        Iniciar estudo ➡️
+      </button>
+    </div>
+
+    <!-- Pomodoro Info -->
+    <div class="mt-10 text-sm text-gray-700">
+      <h2 class="font-semibold mb-2">🍅 O que é o Pomodoro?</h2>
+      <p>
+        Técnica de gestão de tempo baseada em ciclos:
+        25 minutos de foco + 5 minutos de pausa.
+      </p>
+    </div>
+
+  </div>
+
+</body>
+</html>
