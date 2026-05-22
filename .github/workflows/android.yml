@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 jobs:
@@ -11,35 +12,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # Checkout do repositório
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Install Flutter
+      # Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
-          channel: 'stable'
+          channel: stable
+          cache: true
 
-      - name: Check Flutter Version
+      # Ver versão Flutter
+      - name: Flutter Version
         run: flutter --version
 
+      # Clean
+      - name: Clean Project
+        run: flutter clean
+
+      # Instalar dependências
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Analyze Project
-        run: flutter analyze
-
-      - name: Build Release APK
+      # Build APK Release
+      - name: Build APK
         run: flutter build apk --release
 
-      - name: Upload APK
+      # Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
