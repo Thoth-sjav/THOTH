@@ -4,12 +4,20 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-void main() {
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setPreferredOrientations([
+
+  await Firebase.initializeApp();
+
+  await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
+
   runApp(const ThothApp());
 }
 
@@ -161,12 +169,86 @@ class ThothApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Thoth',
         theme: _buildTheme(escuro),
-        home: const PomodoroApp(),
+        home: const AuthGate(),
       ),
     );
   }
 }
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
 
+  @override
+  Widget build(BuildContext context) {
+
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+
+      builder: (context, snapshot) {
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        if (snapshot.hasData) {
+          return const PomodoroApp();
+        }
+
+        return const LoginPage();
+      },
+    );
+  }
+}
+
+class LoginPage extends StatelessWidget {
+  const LoginPage({super.key});
+
+  Future<void> signInWithGoogle() async {
+
+    final GoogleSignInAccount? googleUser =
+        await GoogleSignIn().signIn();
+
+    if (googleUser == null) return;
+
+    final GoogleSignInAuthentication googleAuth =
+        await googleUser.authentication;
+
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    await FirebaseAuth.instance.signInWithCredential(credential);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+
+      body: Center(
+        child: ElevatedButton.icon(
+          onPressed: signInWithGoogle,
+
+          icon: const Icon(Icons.login),
+
+          label: const Text('Entrar com Google'),
+
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 30,
+              vertical: 18,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 // =============================================================================
 // ESTADO CENTRAL
 // =============================================================================
@@ -182,12 +264,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   static const Color _branco = Colors.white;
 
   // Dados
-  List<Tarefa> tarefas = [
-    Tarefa(id: '1', nome: 'Revisão de Matemática', estudo: 1800, descanso: 600, ciclos: 3),
-    Tarefa(id: '2', nome: 'Leitura de Filosofia', estudo: 2700, descanso: 900, ciclos: 2),
-    Tarefa(id: '3', nome: 'Projecto Thoth (Code)', estudo: 5400, descanso: 1200, ciclos: 4),
-    Tarefa(id: '4', nome: 'Prática de Inglês', estudo: 3600, descanso: 300, ciclos: 6),
-  ];
+ List<Tarefa> tarefas = [];
 
   List<ItemTodo> notasTodo = [];
   List<SessaoConcluida> sessoes = [];
