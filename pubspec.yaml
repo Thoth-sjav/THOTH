@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+    
   cupertino_icons: ^1.0.6
 
   # Firebase compatível com Dart 3.4
