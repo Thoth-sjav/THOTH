@@ -1,0 +1,328 @@
+import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+
+class TelaLogin extends StatefulWidget {
+  const TelaLogin({super.key});
+
+  @override
+  State<TelaLogin> createState() => _TelaLoginState();
+}
+
+class _TelaLoginState extends State<TelaLogin> {
+  final AuthService _auth = AuthService();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+
+  bool _modoRegisto = false;
+  bool _carregando = false;
+  bool _verPassword = false;
+  String? _erro;
+
+  static const Color _azul = Color(0xFF1D81C7);
+
+  Future<void> _submeter() async {
+    setState(() { _carregando = true; _erro = null; });
+    try {
+      if (_modoRegisto) {
+        await _auth.registarComEmail(_emailCtrl.text, _passwordCtrl.text);
+      } else {
+        await _auth.loginComEmail(_emailCtrl.text, _passwordCtrl.text);
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _erro = _traduzirErro(e.code));
+    } finally {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  Future<void> _loginGoogle() async {
+    setState(() { _carregando = true; _erro = null; });
+    try {
+      await _auth.loginComGoogle();
+    } on FirebaseAuthException catch (e) {
+      setState(() => _erro = _traduzirErro(e.code));
+    } catch (_) {
+      // utilizador cancelou
+    } finally {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  Future<void> _loginApple() async {
+    setState(() { _carregando = true; _erro = null; });
+    try {
+      await _auth.loginComApple();
+    } on FirebaseAuthException catch (e) {
+      setState(() => _erro = _traduzirErro(e.code));
+    } catch (_) {
+      // utilizador cancelou
+    } finally {
+      if (mounted) setState(() => _carregando = false);
+    }
+  }
+
+  Future<void> _recuperarPassword() async {
+    if (_emailCtrl.text.isEmpty) {
+      setState(() => _erro = "Insere o teu email para recuperar a password.");
+      return;
+    }
+    try {
+      await _auth.recuperarPassword(_emailCtrl.text);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Email de recuperação enviado!"), backgroundColor: _azul),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _erro = _traduzirErro(e.code));
+    }
+  }
+
+  String _traduzirErro(String code) {
+    switch (code) {
+      case 'user-not-found': return 'Utilizador não encontrado.';
+      case 'wrong-password': return 'Password incorreta.';
+      case 'email-already-in-use': return 'Este email já está registado.';
+      case 'weak-password': return 'A password é demasiado fraca (mínimo 6 caracteres).';
+      case 'invalid-email': return 'Email inválido.';
+      case 'too-many-requests': return 'Demasiadas tentativas. Tenta mais tarde.';
+      case 'network-request-failed': return 'Sem ligação à internet.';
+      default: return 'Erro: $code';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 30),
+            child: Column(
+              children: [
+                const SizedBox(height: 20),
+                Text("Thoth", style: TextStyle(fontSize: 42, color: _azul, fontWeight: FontWeight.bold, letterSpacing: 6)),
+                const SizedBox(height: 4),
+                Text("Study Helper", style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.5), letterSpacing: 2)),
+                const SizedBox(height: 50),
+
+                // Título modo
+                Text(
+                  _modoRegisto ? "Criar Conta" : "Entrar",
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                const SizedBox(height: 30),
+
+                // Email
+                _inputField(
+                  controller: _emailCtrl,
+                  label: "Email",
+                  icon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+
+                // Password
+                TextField(
+                  controller: _passwordCtrl,
+                  obscureText: !_verPassword,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: "Password",
+                    labelStyle: const TextStyle(color: _azul),
+                    prefixIcon: const Icon(Icons.lock_outline, color: _azul),
+                    suffixIcon: IconButton(
+                      icon: Icon(_verPassword ? Icons.visibility_off : Icons.visibility, color: Colors.white38),
+                      onPressed: () => setState(() => _verPassword = !_verPassword),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.05),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _azul)),
+                  ),
+                ),
+
+                // Esqueci password
+                if (!_modoRegisto)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _recuperarPassword,
+                      child: const Text("Esqueci a password", style: TextStyle(color: _azul, fontSize: 13)),
+                    ),
+                  ),
+
+                // Erro
+                if (_erro != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.redAccent.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_erro!, style: const TextStyle(color: Colors.redAccent, fontSize: 13))),
+                      ],
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // Botão principal
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _carregando ? null : _submeter,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _azul,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: _carregando
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Text(_modoRegisto ? "CRIAR CONTA" : "ENTRAR", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 1)),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Separador
+                Row(
+                  children: [
+                    Expanded(child: Divider(color: Colors.white.withOpacity(0.15))),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text("ou", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)),
+                    ),
+                    Expanded(child: Divider(color: Colors.white.withOpacity(0.15))),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                // Google
+                _botaoSocial(
+                  onTap: _carregando ? null : _loginGoogle,
+                  icone: _googleIcon(),
+                  texto: "Continuar com Google",
+                ),
+                const SizedBox(height: 12),
+
+                // Apple
+                _botaoSocial(
+                  onTap: _carregando ? null : _loginApple,
+                  icone: const Icon(Icons.apple, color: Colors.white, size: 22),
+                  texto: "Continuar com Apple",
+                ),
+
+                const SizedBox(height: 30),
+
+                // Toggle registo/login
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _modoRegisto ? "Já tens conta? " : "Não tens conta? ",
+                      style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
+                    ),
+                    GestureDetector(
+                      onTap: () => setState(() { _modoRegisto = !_modoRegisto; _erro = null; }),
+                      child: Text(
+                        _modoRegisto ? "Entrar" : "Registar",
+                        style: const TextStyle(color: _azul, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 30),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _inputField({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _azul),
+        prefixIcon: Icon(icon, color: _azul),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.05),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _azul)),
+      ),
+    );
+  }
+
+  Widget _botaoSocial({required VoidCallback? onTap, required Widget icone, required String texto}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        height: 52,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white.withOpacity(0.15)),
+          borderRadius: BorderRadius.circular(12),
+          color: Colors.white.withOpacity(0.03),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            icone,
+            const SizedBox(width: 12),
+            Text(texto, style: const TextStyle(color: Colors.white, fontSize: 14)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _googleIcon() {
+    return SizedBox(
+      width: 22, height: 22,
+      child: CustomPaint(painter: _GoogleIconPainter()),
+    );
+  }
+}
+
+// Ícone Google desenhado manualmente (sem dependência de assets)
+class _GoogleIconPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    // Arco azul
+    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+        -0.3, 2.0, false, Paint()..color = const Color(0xFF4285F4)..style = PaintingStyle.stroke..strokeWidth = 3.5);
+    // Arco vermelho
+    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+        1.7, 1.5, false, Paint()..color = const Color(0xFFEA4335)..style = PaintingStyle.stroke..strokeWidth = 3.5);
+    // Arco amarelo
+    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+        3.2, 0.9, false, Paint()..color = const Color(0xFFFBBC05)..style = PaintingStyle.stroke..strokeWidth = 3.5);
+    // Arco verde
+    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+        4.1, 0.8, false, Paint()..color = const Color(0xFF34A853)..style = PaintingStyle.stroke..strokeWidth = 3.5);
+  }
+
+  @override
+  bool shouldRepaint(_) => false;
+}
