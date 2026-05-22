@@ -13,42 +13,34 @@ jobs:
 
     steps:
 
-      # Checkout do repositório
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Java 17
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.22.3'
           channel: stable
           cache: true
 
-      # Ver versão Flutter
       - name: Flutter Version
         run: flutter --version
 
-      # Clean
       - name: Clean Project
         run: flutter clean
 
-      # Instalar dependências
       - name: Install Dependencies
         run: flutter pub get
 
-      # Build APK Release
       - name: Build APK
         run: flutter build apk --release
 
-      # Upload APK
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
