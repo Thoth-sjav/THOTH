@@ -3026,7 +3026,16 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
           TextButton(
-            onPressed: () { Navigator.pop(ctx); Navigator.pop(context); },
+           onPressed: () async {
+
+  await GoogleSignIn().signOut();
+
+  await FirebaseAuth.instance.signOut();
+
+  if (context.mounted) {
+    Navigator.pop(ctx);
+  }
+},
             child: const Text('Log out', style: TextStyle(color: azul)),
           ),
         ],
