@@ -6,12 +6,12 @@ plugins {
 }
 
 android {
-    namespace = "com.example.thoth_final_final"
+    namespace = "com.thoth.app"
 
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.thoth_final_final"
+        applicationId = "com.thoth.app"
 
         minSdk = 23
         targetSdk = 34
