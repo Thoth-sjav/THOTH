@@ -768,10 +768,31 @@ class _PomodoroAppState extends State<PomodoroApp>
         }
         // Agendar notificação diária
         _agendarNotificacaoDiaria();
+        // Migração: garantir que o username do utilizador está no índice global
+        _migrarUsernameParaIndice();
       }
     } catch (e) {
       debugPrint('Erro ao carregar dados do Firestore: $e');
       if (mounted) setState(() { _aCarregarDados = false; });
+    }
+  }
+
+  // Problema 1 — garante que utilizadores existentes ficam no índice global
+  Future<void> _migrarUsernameParaIndice() async {
+    try {
+      if (perfil.nomedeutilizador.isEmpty) return;
+      final key = perfil.nomedeutilizador.toLowerCase();
+      final doc = await _db.collection('usernames').doc(key).get();
+      // Só escreve se ainda não existir ou se pertencer a este utilizador
+      if (!doc.exists || (doc.data()?['uid'] as String?) == _uid) {
+        await _db.collection('usernames').doc(key).set({
+          'uid': _uid,
+          'nome': perfil.nome,
+          'nomedeutilizador': perfil.nomedeutilizador,
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao migrar username para índice: $e');
     }
   }
 
@@ -4730,7 +4751,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
       final q = query.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
       final results = <Map<String, dynamic>>[];
 
-      // 1. Pesquisa directa por @username no índice global (rápida e eficiente)
+      // 1. Pesquisa exacta por @username no índice global
       final usernameDoc = await _db.collection('usernames').doc(q).get();
       if (usernameDoc.exists) {
         final uid = usernameDoc.data()!['uid'] as String? ?? '';
@@ -4746,18 +4767,16 @@ class _TelaAmigosState extends State<TelaAmigos> {
         }
       }
 
-      // 2. Pesquisa por nome (se query não começa com @) — varre o índice de usernames
-      if (!query.trim().startsWith('@') && q.length >= 2) {
-        final snap = await _db
-            .collection('usernames')
-            .orderBy('nome')
-            .startAt([q]).endAt(['$q\uf8ff'])
-            .limit(10)
-            .get();
+      // 2. Pesquisa parcial por nome/username — sem orderBy, não precisa de índice
+      if (q.length >= 2) {
+        final snap = await _db.collection('usernames').get();
         for (final doc in snap.docs) {
           final uid = doc.data()['uid'] as String? ?? '';
           if (uid.isEmpty || uid == widget.uid) continue;
           if (results.any((r) => r['uid'] == uid)) continue;
+          final nome = (doc.data()['nome'] as String? ?? '').toLowerCase();
+          final username = (doc.data()['nomedeutilizador'] as String? ?? '').toLowerCase();
+          if (!nome.contains(q) && !username.contains(q)) continue;
           final perfilSnap = await _db
               .collection('users').doc(uid).collection('perfil').doc('dados').get();
           if (!perfilSnap.exists) continue;
@@ -4769,7 +4788,8 @@ class _TelaAmigosState extends State<TelaAmigos> {
       }
 
       if (mounted) setState(() { _resultados = results; _searching = false; });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Erro na pesquisa: $e');
       if (mounted) setState(() => _searching = false);
     }
   }
