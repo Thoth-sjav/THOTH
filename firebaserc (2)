@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "thoth-a5c7a"
+  },
+  "targets": {
+    "thoth-a5c7a": {
+      "hosting": {
+        "thoth": [
+          "thoth-a5c7a"
+        ]
+      }
+    }
+  }
+}
