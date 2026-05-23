@@ -4043,8 +4043,40 @@ class TelaDefinicoes extends StatefulWidget {
 class _TelaDefinicoesState extends State<TelaDefinicoes> {
   bool   _notifs   = true;
   bool   _privado  = false;
+  bool   _loadingPrefs = true;
 
   static const azul = Color(0xFF1D81C7);
+
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  DocumentReference get _configDoc =>
+      _db.collection('users').doc(_uid).collection('config').doc('dados');
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarPreferencias();
+  }
+
+  Future<void> _carregarPreferencias() async {
+    try {
+      final snap = await _configDoc.get();
+      if (snap.exists && mounted) {
+        final d = snap.data() as Map<String, dynamic>;
+        setState(() {
+          _notifs  = d['notificacoes'] as bool? ?? true;
+          _privado = d['contaPrivada']  as bool? ?? false;
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loadingPrefs = false);
+  }
+
+  Future<void> _guardarPreferencia(String campo, bool valor) async {
+    try {
+      await _configDoc.set({campo: valor}, SetOptions(merge: true));
+    } catch (_) {}
+  }
 
   // Dados reais da conta Google
   String get _account {
@@ -4235,11 +4267,17 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
 
               // Notificações (toggle)
               _tileToggle(Icons.notifications_outlined, 'Notificações', _notifs, fg, fgMuted, tileBg, border,
-                onChanged: (v) => setState(() => _notifs = v)),
+                onChanged: (v) {
+                  setState(() => _notifs = v);
+                  _guardarPreferencia('notificacoes', v);
+                }),
 
               // Privacidade (toggle)
               _tileToggle(Icons.lock_outline, 'Privacidade', _privado, fg, fgMuted, tileBg, border,
-                onChanged: (v) => setState(() => _privado = v)),
+                onChanged: (v) {
+                  setState(() => _privado = v);
+                  _guardarPreferencia('contaPrivada', v);
+                }),
 
               // Log out
               _tile(Icons.logout, 'Log out', null, fg, fgMuted, tileBg, border,
