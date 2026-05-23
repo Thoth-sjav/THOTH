@@ -1587,7 +1587,7 @@ class _TelaInicialState extends State<_TelaInicial> {
                                   Text('Nenhuma tarefa criada',
                                     style: TextStyle(color: _tc().withOpacity(0.4), fontSize: 16, fontWeight: FontWeight.w300)),
                                   const SizedBox(height: 8),
-                                  Text('Toca em "Gerenciar Tarefas" para começar',
+                                  Text('Toca em "Gerir Tarefas" para começar',
                                     style: TextStyle(color: _tc().withOpacity(0.25), fontSize: 13)),
                                 ],
                               ),
@@ -2063,7 +2063,7 @@ class _TelaGerenciar extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gerenciar Tarefas'),
+        title: const Text('Gerir Tarefas'),
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: _tc()),
           // ignore: invalid_use_of_protected_member
@@ -4685,7 +4685,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
   Future<void> _carregar() async {
     setState(() => _loading = true);
     try {
-      // Amigos aceites
+      // Amigos aceites — lidos da subcoleção do próprio utilizador
       final amigosSnap = await _db
           .collection('users')
           .doc(widget.uid)
@@ -4713,11 +4713,9 @@ class _TelaAmigosState extends State<TelaAmigos> {
             .toList();
         final streak = StreakInfo.calcular(sessoes);
         final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
-
         final perfil = perfilSnap.exists
             ? PerfilUsuario.fromJson(perfilSnap.data()!)
             : PerfilUsuario();
-
         amigos.add({
           'uid': amigoUid,
           'perfil': perfil,
@@ -4727,17 +4725,17 @@ class _TelaAmigosState extends State<TelaAmigos> {
         });
       }
 
-      // Pedidos pendentes recebidos
+      // Pedidos pendentes recebidos — lidos da coleção global
       final pedidosSnap = await _db
-          .collection('users')
-          .doc(widget.uid)
-          .collection('amigos')
-          .where('estado', isEqualTo: 'pendente_recebido')
+          .collection('pedidos_amizade')
+          .where('para', isEqualTo: widget.uid)
+          .where('estado', isEqualTo: 'pendente')
           .get();
 
       final pedidos = <Map<String, dynamic>>[];
       for (final doc in pedidosSnap.docs) {
-        final remetenteUid = doc.id;
+        final remetenteUid = doc.data()['de'] as String? ?? '';
+        if (remetenteUid.isEmpty) continue;
         final perfilSnap = await _db
             .collection('users')
             .doc(remetenteUid)
@@ -4747,11 +4745,12 @@ class _TelaAmigosState extends State<TelaAmigos> {
         final perfil = perfilSnap.exists
             ? PerfilUsuario.fromJson(perfilSnap.data()!)
             : PerfilUsuario();
-        pedidos.add({'uid': remetenteUid, 'perfil': perfil});
+        pedidos.add({'uid': remetenteUid, 'perfil': perfil, 'docId': doc.id});
       }
 
       if (mounted) setState(() { _amigos = amigos; _pedidos = pedidos; _loading = false; });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Erro ao carregar amigos: $e');
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -4807,49 +4806,63 @@ class _TelaAmigosState extends State<TelaAmigos> {
   }
 
   Future<void> _enviarPedido(String amigoUid) async {
-    // Para mim: pendente_enviado; para ele: pendente_recebido
-    final batch = _db.batch();
-    batch.set(
-      _db.collection('users').doc(widget.uid).collection('amigos').doc(amigoUid),
-      {'estado': 'pendente_enviado'},
-    );
-    batch.set(
-      _db.collection('users').doc(amigoUid).collection('amigos').doc(widget.uid),
-      {'estado': 'pendente_recebido'},
-    );
-    await batch.commit();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pedido de amizade enviado!')),
-      );
-      setState(() {
-        for (final r in _resultados) {
-          if (r['uid'] == amigoUid) r['jaPedido'] = true;
-        }
+    try {
+      // Escreve na coleção global — qualquer utilizador autenticado pode escrever
+      await _db.collection('pedidos_amizade').add({
+        'de': widget.uid,
+        'para': amigoUid,
+        'estado': 'pendente',
+        'data': FieldValue.serverTimestamp(),
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pedido de amizade enviado!')),
+        );
+        setState(() {
+          for (final r in _resultados) {
+            if (r['uid'] == amigoUid) r['jaPedido'] = true;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao enviar pedido: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao enviar pedido. Tenta novamente.'),
+              backgroundColor: Colors.redAccent),
+        );
+      }
     }
   }
 
-  Future<void> _aceitarPedido(String remetenteUid) async {
-    final batch = _db.batch();
-    batch.set(
-      _db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid),
-      {'estado': 'aceite'},
-    );
-    batch.set(
-      _db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid),
-      {'estado': 'aceite'},
-    );
-    await batch.commit();
-    _carregar();
+  Future<void> _aceitarPedido(String remetenteUid, String docId) async {
+    try {
+      final batch = _db.batch();
+      // Marca amizade nos dois perfis
+      batch.set(
+        _db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid),
+        {'estado': 'aceite'},
+      );
+      batch.set(
+        _db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid),
+        {'estado': 'aceite'},
+      );
+      // Apaga o pedido da coleção global
+      batch.delete(_db.collection('pedidos_amizade').doc(docId));
+      await batch.commit();
+      _carregar();
+    } catch (e) {
+      debugPrint('Erro ao aceitar pedido: $e');
+    }
   }
 
-  Future<void> _recusarPedido(String remetenteUid) async {
-    final batch = _db.batch();
-    batch.delete(_db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid));
-    batch.delete(_db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid));
-    await batch.commit();
-    _carregar();
+  Future<void> _recusarPedido(String remetenteUid, String docId) async {
+    try {
+      await _db.collection('pedidos_amizade').doc(docId).delete();
+      _carregar();
+    } catch (e) {
+      debugPrint('Erro ao recusar pedido: $e');
+    }
   }
 
   String _fmtTempo(int segundos) {
@@ -5041,12 +5054,12 @@ class _TelaAmigosState extends State<TelaAmigos> {
                               ),
                               IconButton(
                                 icon: const Icon(Icons.check, color: Colors.greenAccent),
-                                onPressed: () => _aceitarPedido(p['uid'] as String),
+                                onPressed: () => _aceitarPedido(p['uid'] as String, p['docId'] as String),
                                 tooltip: 'Aceitar',
                               ),
                               IconButton(
                                 icon: const Icon(Icons.close, color: Colors.redAccent),
-                                onPressed: () => _recusarPedido(p['uid'] as String),
+                                onPressed: () => _recusarPedido(p['uid'] as String, p['docId'] as String),
                                 tooltip: 'Recusar',
                               ),
                             ],
