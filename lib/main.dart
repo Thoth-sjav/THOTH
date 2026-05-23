@@ -186,6 +186,63 @@ class SessaoConcluida {
 }
 
 // =============================================================================
+// STREAK
+// =============================================================================
+
+class StreakInfo {
+  final int dias;
+  final DateTime? ultimoEstudo;
+
+  const StreakInfo({required this.dias, this.ultimoEstudo});
+
+  bool get acendeuHoje {
+    if (ultimoEstudo == null) return false;
+    final agora = DateTime.now();
+    final ult = ultimoEstudo!;
+    return ult.year == agora.year && ult.month == agora.month && ult.day == agora.day;
+  }
+
+  static StreakInfo calcular(List<SessaoConcluida> sessoes) {
+    if (sessoes.isEmpty) return const StreakInfo(dias: 0);
+    final dias = <String>{};
+    for (final s in sessoes) {
+      final d = s.dataConclusao;
+      dias.add('${d.year}-${d.month}-${d.day}');
+    }
+    final sorted = dias.toList()..sort();
+    int streak = 1;
+    final today = DateTime.now();
+    final todayStr = '${today.year}-${today.month}-${today.day}';
+    final yesterday = today.subtract(const Duration(days: 1));
+    final yesterdayStr = '${yesterday.year}-${yesterday.month}-${yesterday.day}';
+    if (!dias.contains(todayStr) && !dias.contains(yesterdayStr)) return const StreakInfo(dias: 0);
+    for (int i = sorted.length - 1; i > 0; i--) {
+      final curr = DateTime.parse(sorted[i]);
+      final prev = DateTime.parse(sorted[i - 1]);
+      if (curr.difference(prev).inDays == 1) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    final lastSession = sessoes.reduce((a, b) => a.dataConclusao.isAfter(b.dataConclusao) ? a : b);
+    return StreakInfo(dias: streak, ultimoEstudo: lastSession.dataConclusao);
+  }
+
+  static const List<Map<String, dynamic>> conquistas = [
+    {'dias': 3,   'label': '3 dias',    'icon': '🔥'},
+    {'dias': 7,   'label': '1 semana',  'icon': '⚡'},
+    {'dias': 10,  'label': '10 dias',   'icon': '💪'},
+    {'dias': 30,  'label': '30 dias',   'icon': '🏅'},
+    {'dias': 50,  'label': '50 dias',   'icon': '🥈'},
+    {'dias': 75,  'label': '75 dias',   'icon': '🥇'},
+    {'dias': 100, 'label': '100 dias',  'icon': '💎'},
+    {'dias': 180, 'label': '6 meses',   'icon': '🌟'},
+    {'dias': 365, 'label': '1 ano',     'icon': '👑'},
+  ];
+}
+
+// =============================================================================
 // APP PRINCIPAL
 // =============================================================================
 
@@ -931,6 +988,17 @@ class _MenuLateral extends StatelessWidget {
             },
           ),
           _drawerItem(
+            icon: Icons.group_outlined,
+            label: 'Amigos',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
+              );
+            },
+          ),
+          _drawerItem(
             icon: Icons.task_alt,
             label: 'Tarefas Concluídas',
             onTap: () {
@@ -1138,6 +1206,8 @@ class _TelaInicialState extends State<_TelaInicial> {
                     ),
                   ),
                   const SizedBox(width: 10),
+                  // ── Streak badge ──────────────────────────────────
+                  _StreakBadge(streak: StreakInfo.calcular(widget.state.sessoes)),
                   const Expanded(child: SizedBox()),
                   IconButton(
                     icon: const Icon(Icons.menu, color: Colors.white, size: 26),
@@ -1298,6 +1368,182 @@ class _TelaInicialState extends State<_TelaInicial> {
     );
   }
 }
+
+// =============================================================================
+// STREAK BADGE
+// =============================================================================
+
+class _StreakBadge extends StatelessWidget {
+  final StreakInfo streak;
+  const _StreakBadge({required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    final aceso = streak.acendeuHoje;
+    final dias = streak.dias;
+    return GestureDetector(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (_) => _StreakDialog(streak: streak),
+        );
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: aceso
+              ? const Color(0xFFFF6D00).withOpacity(0.25)
+              : Colors.white.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: aceso ? const Color(0xFFFF6D00) : Colors.white24,
+            width: 1.2,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              aceso ? '🔥' : '🔥',
+              style: TextStyle(
+                fontSize: 16,
+                color: aceso ? null : null,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '$dias',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: aceso ? const Color(0xFFFFCC02) : Colors.white60,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StreakDialog extends StatelessWidget {
+  final StreakInfo streak;
+  const _StreakDialog({required this.streak});
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    final dias = streak.dias;
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: temaEscuro.value ? const Color(0xFF111111) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFFFF6D00).withOpacity(0.4)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🔥', style: TextStyle(fontSize: 48)),
+            const SizedBox(height: 8),
+            Text(
+              '$dias dias seguidos!',
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.bold,
+                color: _tc(),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              streak.acendeuHoje
+                  ? 'Estudaste hoje. Continua assim!'
+                  : 'Estuda hoje para não perder a streak!',
+              style: TextStyle(color: _tc54(), fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Conquistas de streak',
+                style: TextStyle(
+                  color: azul, fontSize: 14, fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            ...StreakInfo.conquistas.map((c) {
+              final meta = c['dias'] as int;
+              final conquistada = dias >= meta;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Text(c['icon'] as String,
+                      style: TextStyle(
+                        fontSize: 20,
+                        color: conquistada ? null : null,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            c['label'] as String,
+                            style: TextStyle(
+                              color: conquistada ? _tc() : _tc38(),
+                              fontWeight: conquistada
+                                  ? FontWeight.bold
+                                  : FontWeight.normal,
+                              fontSize: 14,
+                            ),
+                          ),
+                          LinearProgressIndicator(
+                            value: (dias / meta).clamp(0.0, 1.0),
+                            backgroundColor: _tc12(),
+                            color: conquistada
+                                ? const Color(0xFFFF6D00)
+                                : azul,
+                            minHeight: 3,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (conquistada)
+                      const Icon(Icons.check_circle, color: Color(0xFFFF6D00), size: 16)
+                    else
+                      Text(
+                        '$meta',
+                        style: TextStyle(color: _tc38(), fontSize: 12),
+                      ),
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fechar', style: TextStyle(color: azul)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// CARTÃO RETOMAR
+// =============================================================================
 
 class _CartaoRetomar extends StatelessWidget {
   final _PomodoroAppState state;
@@ -2969,6 +3215,7 @@ class TelaInsights extends StatelessWidget {
 
     final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
     final totalCiclos = sessoes.fold<int>(0, (s, e) => s + e.ciclosConcluidos);
+    final streak = StreakInfo.calcular(sessoes);
 
     // Tarefa mais estudada
     final contagem = <String, int>{};
@@ -2984,6 +3231,13 @@ class TelaInsights extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Insights'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            tooltip: 'Partilhar',
+            onPressed: () => _partilhar(context, streak, totalFoco, totalCiclos, sessoes.length),
+          ),
+        ],
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(color: azul, height: 1),
@@ -3019,6 +3273,131 @@ class TelaInsights extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── Streak card ─────────────────────────────────────
+                  GestureDetector(
+                    onTap: () => showDialog(
+                      context: context,
+                      builder: (_) => _StreakDialog(streak: streak),
+                    ),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: streak.acendeuHoje
+                              ? [const Color(0xFFFF6D00).withOpacity(0.15), const Color(0xFFFFCC02).withOpacity(0.08)]
+                              : [azul.withOpacity(0.08), azul.withOpacity(0.04)],
+                        ),
+                        border: Border.all(
+                          color: streak.acendeuHoje
+                              ? const Color(0xFFFF6D00).withOpacity(0.5)
+                              : azul.withOpacity(0.3),
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          Text('🔥', style: const TextStyle(fontSize: 36)),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${streak.dias} dias seguidos',
+                                  style: TextStyle(
+                                    color: _tc(),
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  streak.acendeuHoje
+                                      ? 'Streak activa hoje! 💪'
+                                      : 'Estuda hoje para manter a streak',
+                                  style: TextStyle(color: _tc54(), fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, color: Colors.white38),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ── Conquistas ──────────────────────────────────────
+                  const Text(
+                    'Conquistas',
+                    style: TextStyle(color: azul, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 90,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: StreakInfo.conquistas.map((c) {
+                        final conquistada = streak.dias >= (c['dias'] as int);
+                        return Container(
+                          width: 72,
+                          margin: const EdgeInsets.only(right: 10),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: conquistada
+                                ? const Color(0xFFFF6D00).withOpacity(0.12)
+                                : _tc().withOpacity(0.04),
+                            border: Border.all(
+                              color: conquistada
+                                  ? const Color(0xFFFF6D00).withOpacity(0.6)
+                                  : _tc().withOpacity(0.1),
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                c['icon'] as String,
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  color: conquistada ? null : null,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                c['label'] as String,
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  color: conquistada ? _tc() : _tc38(),
+                                  fontWeight: conquistada ? FontWeight.bold : FontWeight.normal,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Botão partilhar
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _partilhar(context, streak, totalFoco, totalCiclos, sessoes.length),
+                      icon: const Icon(Icons.share_outlined, color: azul, size: 18),
+                      label: const Text('Partilhar os meus insights', style: TextStyle(color: azul)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: azul.withOpacity(0.5)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
                   // Cards de resumo
                   Row(
                     children: [
@@ -3087,6 +3466,87 @@ class TelaInsights extends StatelessWidget {
                 ],
               ),
             ),
+    );
+  }
+
+  void _partilhar(BuildContext context, StreakInfo streak, int totalFoco, int totalCiclos, int totalSessoes) {
+    const azul = Color(0xFF1D81C7);
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: temaEscuro.value ? const Color(0xFF0A0A0A) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: azul.withOpacity(0.3)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Card de partilha (estilo Duolingo)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: temaEscuro.value ? const Color(0xFF111111) : const Color(0xFFF5F9FF),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: azul.withOpacity(0.2)),
+                ),
+                child: Column(
+                  children: [
+                    const Text('T H O T H', style: TextStyle(color: azul, fontSize: 13, letterSpacing: 4, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _shareStatCol('🔥', '${streak.dias}', 'streak'),
+                        _shareStatCol('⏱', _formatarTempo(totalFoco), 'foco total'),
+                        _shareStatCol('🔁', '$totalCiclos', 'ciclos'),
+                        _shareStatCol('✅', '$totalSessoes', 'sessões'),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    if (streak.dias > 0) ...[
+                      // Conquistas desbloqueadas
+                      Wrap(
+                        spacing: 6,
+                        children: StreakInfo.conquistas
+                            .where((c) => streak.dias >= (c['dias'] as int))
+                            .map((c) => Text(c['icon'] as String, style: const TextStyle(fontSize: 20)))
+                            .toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Copia este cartão e partilha com os teus amigos!',
+                style: TextStyle(color: _tc54(), fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Fechar', style: TextStyle(color: azul)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _shareStatCol(String emoji, String valor, String label) {
+    return Column(
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 22)),
+        const SizedBox(height: 4),
+        Text(valor, style: TextStyle(color: _tc(), fontSize: 16, fontWeight: FontWeight.bold)),
+        Text(label, style: TextStyle(color: _tc54(), fontSize: 10)),
+      ],
     );
   }
 
@@ -3764,6 +4224,520 @@ class _MiniPreview extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// =============================================================================
+// TELA AMIGOS
+// =============================================================================
+
+class TelaAmigos extends StatefulWidget {
+  final String uid;
+  const TelaAmigos({super.key, required this.uid});
+
+  @override
+  State<TelaAmigos> createState() => _TelaAmigosState();
+}
+
+class _TelaAmigosState extends State<TelaAmigos> {
+  static const azul = Color(0xFF1D81C7);
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  List<Map<String, dynamic>> _amigos = [];
+  List<Map<String, dynamic>> _pedidos = [];
+  bool _loading = true;
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<Map<String, dynamic>> _resultados = [];
+  bool _searching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregar();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregar() async {
+    setState(() => _loading = true);
+    try {
+      // Amigos aceites
+      final amigosSnap = await _db
+          .collection('users')
+          .doc(widget.uid)
+          .collection('amigos')
+          .where('estado', isEqualTo: 'aceite')
+          .get();
+
+      final amigos = <Map<String, dynamic>>[];
+      for (final doc in amigosSnap.docs) {
+        final amigoUid = doc.id;
+        final perfilSnap = await _db
+            .collection('users')
+            .doc(amigoUid)
+            .collection('perfil')
+            .doc('dados')
+            .get();
+        final sessoesSnap = await _db
+            .collection('users')
+            .doc(amigoUid)
+            .collection('sessoes')
+            .orderBy('dataConclusao')
+            .get();
+        final sessoes = sessoesSnap.docs
+            .map((d) => SessaoConcluida.fromJson(d.data()))
+            .toList();
+        final streak = StreakInfo.calcular(sessoes);
+        final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
+
+        final perfil = perfilSnap.exists
+            ? PerfilUsuario.fromJson(perfilSnap.data()!)
+            : PerfilUsuario();
+
+        amigos.add({
+          'uid': amigoUid,
+          'perfil': perfil,
+          'streak': streak,
+          'totalFoco': totalFoco,
+          'totalSessoes': sessoes.length,
+        });
+      }
+
+      // Pedidos pendentes recebidos
+      final pedidosSnap = await _db
+          .collection('users')
+          .doc(widget.uid)
+          .collection('amigos')
+          .where('estado', isEqualTo: 'pendente_recebido')
+          .get();
+
+      final pedidos = <Map<String, dynamic>>[];
+      for (final doc in pedidosSnap.docs) {
+        final remetenteUid = doc.id;
+        final perfilSnap = await _db
+            .collection('users')
+            .doc(remetenteUid)
+            .collection('perfil')
+            .doc('dados')
+            .get();
+        final perfil = perfilSnap.exists
+            ? PerfilUsuario.fromJson(perfilSnap.data()!)
+            : PerfilUsuario();
+        pedidos.add({'uid': remetenteUid, 'perfil': perfil});
+      }
+
+      if (mounted) setState(() { _amigos = amigos; _pedidos = pedidos; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pesquisar(String query) async {
+    if (query.trim().isEmpty) { setState(() => _resultados = []); return; }
+    setState(() => _searching = true);
+    try {
+      final snap = await _db
+          .collection('users')
+          .get();
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        if (doc.id == widget.uid) continue;
+        final perfilSnap = await _db
+            .collection('users')
+            .doc(doc.id)
+            .collection('perfil')
+            .doc('dados')
+            .get();
+        if (!perfilSnap.exists) continue;
+        final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+        final q = query.toLowerCase();
+        if (perfil.nome.toLowerCase().contains(q) ||
+            perfil.nomedeutilizador.toLowerCase().contains(q)) {
+          // Check if already friends
+          final jaAmigo = _amigos.any((a) => a['uid'] == doc.id);
+          final jaPedido = _pedidos.any((p) => p['uid'] == doc.id);
+          results.add({'uid': doc.id, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
+        }
+      }
+      if (mounted) setState(() { _resultados = results; _searching = false; });
+    } catch (_) {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _enviarPedido(String amigoUid) async {
+    // Para mim: pendente_enviado; para ele: pendente_recebido
+    final batch = _db.batch();
+    batch.set(
+      _db.collection('users').doc(widget.uid).collection('amigos').doc(amigoUid),
+      {'estado': 'pendente_enviado'},
+    );
+    batch.set(
+      _db.collection('users').doc(amigoUid).collection('amigos').doc(widget.uid),
+      {'estado': 'pendente_recebido'},
+    );
+    await batch.commit();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pedido de amizade enviado!')),
+      );
+      setState(() {
+        for (final r in _resultados) {
+          if (r['uid'] == amigoUid) r['jaPedido'] = true;
+        }
+      });
+    }
+  }
+
+  Future<void> _aceitarPedido(String remetenteUid) async {
+    final batch = _db.batch();
+    batch.set(
+      _db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid),
+      {'estado': 'aceite'},
+    );
+    batch.set(
+      _db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid),
+      {'estado': 'aceite'},
+    );
+    await batch.commit();
+    _carregar();
+  }
+
+  Future<void> _recusarPedido(String remetenteUid) async {
+    final batch = _db.batch();
+    batch.delete(_db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid));
+    batch.delete(_db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid));
+    await batch.commit();
+    _carregar();
+  }
+
+  String _fmtTempo(int segundos) {
+    if (segundos >= 3600) {
+      final h = segundos ~/ 3600;
+      final m = (segundos % 3600) ~/ 60;
+      return m > 0 ? '${h}h ${m}m' : '${h}h';
+    }
+    return '${segundos ~/ 60}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: temaEscuro,
+      builder: (_, _esc, __) => Scaffold(
+        appBar: AppBar(
+          title: const Text('Amigos'),
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(1),
+            child: Divider(color: azul, height: 1),
+          ),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Pesquisa ──────────────────────────────────────
+                    TextField(
+                      controller: _searchCtrl,
+                      style: TextStyle(color: _tc()),
+                      decoration: InputDecoration(
+                        hintText: 'Pesquisar por nome ou utilizador...',
+                        hintStyle: TextStyle(color: _tc38()),
+                        prefixIcon: Icon(Icons.search, color: _tc54()),
+                        suffixIcon: _searching
+                            ? const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              )
+                            : null,
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: _tc24()),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        focusedBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: azul),
+                          borderRadius: BorderRadius.all(Radius.circular(12)),
+                        ),
+                      ),
+                      onChanged: (v) => Future.delayed(
+                        const Duration(milliseconds: 500),
+                        () { if (_searchCtrl.text == v) _pesquisar(v); },
+                      ),
+                    ),
+
+                    if (_resultados.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Text('Resultados', style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      ..._resultados.map((r) {
+                        final perfil = r['perfil'] as PerfilUsuario;
+                        final jaAmigo = r['jaAmigo'] as bool? ?? false;
+                        final jaPedido = r['jaPedido'] as bool? ?? false;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: _tc24()),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: azul.withOpacity(0.15),
+                                child: Text(
+                                  perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                  style: const TextStyle(color: azul, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(perfil.nome, style: TextStyle(color: _tc(), fontWeight: FontWeight.bold)),
+                                    if (perfil.nomedeutilizador.isNotEmpty)
+                                      Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              if (jaAmigo)
+                                const Icon(Icons.check_circle, color: azul, size: 20)
+                              else if (jaPedido)
+                                Text('Enviado', style: TextStyle(color: _tc38(), fontSize: 12))
+                              else
+                                IconButton(
+                                  icon: const Icon(Icons.person_add_outlined, color: azul),
+                                  onPressed: () => _enviarPedido(r['uid'] as String),
+                                  tooltip: 'Adicionar amigo',
+                                ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const Divider(height: 24),
+                    ],
+
+                    // ── Pedidos pendentes ────────────────────────────
+                    if (_pedidos.isNotEmpty) ...[
+                      const Text('Pedidos recebidos', style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      ..._pedidos.map((p) {
+                        final perfil = p['perfil'] as PerfilUsuario;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.35)),
+                            borderRadius: BorderRadius.circular(12),
+                            color: azul.withOpacity(0.05),
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: azul.withOpacity(0.15),
+                                child: Text(
+                                  perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                  style: const TextStyle(color: azul, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(perfil.nome, style: TextStyle(color: _tc(), fontWeight: FontWeight.bold)),
+                                    if (perfil.nomedeutilizador.isNotEmpty)
+                                      Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.check, color: Colors.greenAccent),
+                                onPressed: () => _aceitarPedido(p['uid'] as String),
+                                tooltip: 'Aceitar',
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.redAccent),
+                                onPressed: () => _recusarPedido(p['uid'] as String),
+                                tooltip: 'Recusar',
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const Divider(height: 24),
+                    ],
+
+                    // ── Lista de amigos ──────────────────────────────
+                    Row(
+                      children: [
+                        Text(
+                          'Os meus amigos',
+                          style: const TextStyle(color: azul, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('(${_amigos.length})', style: TextStyle(color: _tc38(), fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    if (_amigos.isEmpty)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 40),
+                          child: Column(
+                            children: [
+                              Icon(Icons.group_outlined, size: 56, color: _tc().withOpacity(0.15)),
+                              const SizedBox(height: 12),
+                              Text('Ainda sem amigos', style: TextStyle(color: _tc38(), fontSize: 15)),
+                              const SizedBox(height: 6),
+                              Text('Pesquisa pelo nome para adicionar', style: TextStyle(color: _tc().withOpacity(0.2), fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._amigos.map((a) {
+                        final perfil = a['perfil'] as PerfilUsuario;
+                        final streak = a['streak'] as StreakInfo;
+                        final totalFoco = a['totalFoco'] as int;
+                        final totalSessoes = a['totalSessoes'] as int;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: _tc().withOpacity(0.1)),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Header do amigo
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 22,
+                                    backgroundColor: azul.withOpacity(0.15),
+                                    backgroundImage: perfil.fotoUrl.isNotEmpty
+                                        ? NetworkImage(perfil.fotoUrl)
+                                        : null,
+                                    child: perfil.fotoUrl.isEmpty
+                                        ? Text(
+                                            perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                            style: const TextStyle(color: azul, fontWeight: FontWeight.bold, fontSize: 18),
+                                          )
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          perfil.nome.isNotEmpty ? perfil.nome : 'Sem nome',
+                                          style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 15),
+                                        ),
+                                        if (perfil.nomedeutilizador.isNotEmpty)
+                                          Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc38(), fontSize: 12)),
+                                      ],
+                                    ),
+                                  ),
+                                  // Streak badge do amigo
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: streak.acendeuHoje
+                                          ? const Color(0xFFFF6D00).withOpacity(0.15)
+                                          : _tc().withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: streak.acendeuHoje
+                                            ? const Color(0xFFFF6D00).withOpacity(0.5)
+                                            : _tc24(),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Text('🔥', style: TextStyle(fontSize: 14)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          '${streak.dias}',
+                                          style: TextStyle(
+                                            color: streak.acendeuHoje ? const Color(0xFFFFCC02) : _tc38(),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              // Stats
+                              Row(
+                                children: [
+                                  _statAmigo(Icons.timer_outlined, _fmtTempo(totalFoco), 'foco total'),
+                                  const SizedBox(width: 20),
+                                  _statAmigo(Icons.task_alt, '$totalSessoes', 'sessões'),
+                                ],
+                              ),
+                              // Conquistas do amigo
+                              if (streak.dias > 0) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 4,
+                                  children: StreakInfo.conquistas
+                                      .where((c) => streak.dias >= (c['dias'] as int))
+                                      .map((c) => Tooltip(
+                                            message: c['label'] as String,
+                                            child: Text(c['icon'] as String,
+                                              style: const TextStyle(fontSize: 18)),
+                                          ))
+                                      .toList(),
+                                ),
+                              ],
+                              // Citação se existir
+                              if (perfil.citacao.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  '"${perfil.citacao}"',
+                                  style: TextStyle(color: _tc54(), fontSize: 11, fontStyle: FontStyle.italic),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _statAmigo(IconData icon, String valor, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: const Color(0xFF1D81C7)),
+        const SizedBox(width: 4),
+        Text(valor, style: TextStyle(color: _tc(), fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(width: 3),
+        Text(label, style: TextStyle(color: _tc54(), fontSize: 11)),
+      ],
     );
   }
 }
