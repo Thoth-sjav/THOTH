@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,6 +62,30 @@ class Tarefa {
         segundosSalvos: segundosSalvos,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'nome': nome,
+        'estudo': estudo,
+        'descanso': descanso,
+        'ciclos': ciclos,
+        'progressoSalvo': progressoSalvo,
+        'cicloSalvo': cicloSalvo,
+        'estavaNoDescanso': estavaNoDescanso,
+        'segundosSalvos': segundosSalvos,
+      };
+
+  factory Tarefa.fromJson(Map<String, dynamic> j) => Tarefa(
+        id: j['id'] as String,
+        nome: j['nome'] as String? ?? '',
+        estudo: j['estudo'] as int? ?? 1500,
+        descanso: j['descanso'] as int? ?? 300,
+        ciclos: j['ciclos'] as int? ?? 4,
+        progressoSalvo: (j['progressoSalvo'] as num?)?.toDouble() ?? 0.0,
+        cicloSalvo: j['cicloSalvo'] as int? ?? 1,
+        estavaNoDescanso: j['estavaNoDescanso'] as bool? ?? false,
+        segundosSalvos: j['segundosSalvos'] as int? ?? 1500,
+      );
+
   /// Tempo total estimado em segundos (todos os ciclos de estudo + descanso)
   int get tempoTotalSegundos => ciclos * estudo + (ciclos - 1) * descanso;
 }
@@ -76,6 +102,20 @@ class ItemTodo {
     required this.dataHora,
     this.concluido = false,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'texto': texto,
+        'dataHora': dataHora,
+        'concluido': concluido,
+      };
+
+  factory ItemTodo.fromJson(Map<String, dynamic> j) => ItemTodo(
+        id: j['id'] as String,
+        texto: j['texto'] as String? ?? '',
+        dataHora: j['dataHora'] as String? ?? '',
+        concluido: j['concluido'] as bool? ?? false,
+      );
 }
 
 class PerfilUsuario {
@@ -92,6 +132,22 @@ class PerfilUsuario {
     this.motivos = '',
     this.citacao = '',
   });
+
+  Map<String, dynamic> toJson() => {
+        'nome': nome,
+        'nomedeutilizador': nomedeutilizador,
+        'descricao': descricao,
+        'motivos': motivos,
+        'citacao': citacao,
+      };
+
+  factory PerfilUsuario.fromJson(Map<String, dynamic> j) => PerfilUsuario(
+        nome: j['nome'] as String? ?? '',
+        nomedeutilizador: j['nomedeutilizador'] as String? ?? '',
+        descricao: j['descricao'] as String? ?? '',
+        motivos: j['motivos'] as String? ?? '',
+        citacao: j['citacao'] as String? ?? '',
+      );
 }
 
 /// Registo imutável de uma sessão concluída
@@ -107,6 +163,20 @@ class SessaoConcluida {
     required this.ciclosConcluidos,
     required this.tempoFocoSegundos,
   });
+
+  Map<String, dynamic> toJson() => {
+        'tarefaNome': tarefaNome,
+        'dataConclusao': dataConclusao.toIso8601String(),
+        'ciclosConcluidos': ciclosConcluidos,
+        'tempoFocoSegundos': tempoFocoSegundos,
+      };
+
+  factory SessaoConcluida.fromJson(Map<String, dynamic> j) => SessaoConcluida(
+        tarefaNome: j['tarefaNome'] as String? ?? '',
+        dataConclusao: DateTime.parse(j['dataConclusao'] as String),
+        ciclosConcluidos: j['ciclosConcluidos'] as int? ?? 0,
+        tempoFocoSegundos: j['tempoFocoSegundos'] as int? ?? 0,
+      );
 }
 
 // =============================================================================
@@ -402,10 +472,93 @@ class _PomodoroAppState extends State<PomodoroApp>
   // CICLO DE VIDA
   // ---------------------------------------------------------------------------
 
+  // ── Persistence helpers ────────────────────────────────────────────────────
+  static const _kTarefas    = 'tarefas_v1';
+  static const _kTodo       = 'todo_blocos_v1';
+  static const _kSessoes    = 'sessoes_v1';
+  static const _kPerfil     = 'perfil_v1';
+  static const _kUltima     = 'ultima_tarefa_v1';
+  static const _kTema       = 'tema_escuro_v1';
+  static const _kCountdown  = 'countdown_v1';
+
+  Future<void> _carregarDados() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Tema
+    final temaGuardado = prefs.getBool(_kTema);
+    if (temaGuardado != null) temaEscuro.value = temaGuardado;
+
+    // Tarefas
+    final tarefasJson = prefs.getString(_kTarefas);
+    if (tarefasJson != null) {
+      final list = jsonDecode(tarefasJson) as List<dynamic>;
+      tarefas = list.map((e) => Tarefa.fromJson(e as Map<String, dynamic>)).toList();
+    }
+
+    // Sessões
+    final sessoesJson = prefs.getString(_kSessoes);
+    if (sessoesJson != null) {
+      final list = jsonDecode(sessoesJson) as List<dynamic>;
+      sessoes = list.map((e) => SessaoConcluida.fromJson(e as Map<String, dynamic>)).toList();
+    }
+
+    // Perfil
+    final perfilJson = prefs.getString(_kPerfil);
+    if (perfilJson != null) {
+      perfil = PerfilUsuario.fromJson(jsonDecode(perfilJson) as Map<String, dynamic>);
+    }
+
+    // To-do blocos — guardados como mapa de bloco → lista de itens
+    final todoJson = prefs.getString(_kTodo);
+    _todoBlocosGuardados = todoJson;
+
+    // Última tarefa
+    final ultimaJson = prefs.getString(_kUltima);
+    if (ultimaJson != null) {
+      final id = ultimaJson;
+      try {
+        ultimaTarefa = tarefas.firstWhere((t) => t.id == id);
+      } catch (_) {}
+    }
+
+    // Countdown
+    final countdownJson = prefs.getString(_kCountdown);
+    if (countdownJson != null) {
+      final m = jsonDecode(countdownJson) as Map<String, dynamic>;
+      _countdownAlvoGuardado = DateTime.tryParse(m['alvo'] as String? ?? '');
+      _countdownMotivoGuardado = m['motivo'] as String?;
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  String? _todoBlocosGuardados;
+  DateTime? _countdownAlvoGuardado;
+  String? _countdownMotivoGuardado;
+
+  Future<void> _guardarTudo() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kTarefas, jsonEncode(tarefas.map((t) => t.toJson()).toList()));
+    await prefs.setString(_kSessoes, jsonEncode(sessoes.map((s) => s.toJson()).toList()));
+    await prefs.setString(_kPerfil, jsonEncode(perfil.toJson()));
+    await prefs.setBool(_kTema, temaEscuro.value);
+    if (ultimaTarefa != null) {
+      await prefs.setString(_kUltima, ultimaTarefa!.id);
+    } else {
+      await prefs.remove(_kUltima);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _carregarDados();
+    // Guardar quando o tema muda
+    temaEscuro.addListener(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kTema, temaEscuro.value);
+    });
   }
 
   @override
@@ -418,13 +571,28 @@ class _PomodoroAppState extends State<PomodoroApp>
   /// Pausa automática quando a app vai para background
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused && estadoApp == EstadoApp.cronometro) {
-      if (!pausado) {
-        setState(() => pausado = true);
-        _salvarEstadoAtual();
+    if (state == AppLifecycleState.paused) {
+      _salvarEstadoAtual();
+      _guardarTudo();
+      // Cronómetro continua a correr internamente — apenas pausa o ecrã
+    }
+    if (state == AppLifecycleState.resumed) {
+      // Recalcular segundos perdidos enquanto o ecrã estava desligado
+      if (estadoApp == EstadoApp.cronometro && !pausado && _backgroundTimestamp != null) {
+        final elapsed = DateTime.now().difference(_backgroundTimestamp!).inSeconds;
+        _backgroundTimestamp = null;
+        setState(() {
+          segundosRestantes = (segundosRestantes - elapsed).clamp(0, 999999);
+        });
+        if (segundosRestantes <= 0) _avancarFase();
       }
     }
+    if (state == AppLifecycleState.inactive && estadoApp == EstadoApp.cronometro && !pausado) {
+      _backgroundTimestamp = DateTime.now();
+    }
   }
+
+  DateTime? _backgroundTimestamp;
 
   // ---------------------------------------------------------------------------
   // LÓGICA POMODORO
@@ -555,6 +723,7 @@ class _PomodoroAppState extends State<PomodoroApp>
       ));
     }
     setState(() => estadoApp = EstadoApp.fim);
+    _guardarTudo();
   }
 
   void reset() {
@@ -579,6 +748,7 @@ class _PomodoroAppState extends State<PomodoroApp>
       }
       tarefas.removeAt(index);
     });
+    _guardarTudo();
   }
 
   String formatar(int s) {
@@ -595,7 +765,12 @@ class _PomodoroAppState extends State<PomodoroApp>
   Widget build(BuildContext context) {
     switch (estadoApp) {
       case EstadoApp.inicio:
-        return _TelaInicial(state: this);
+        return _TelaInicial(
+          state: this,
+          countdownAlvoInicial: _countdownAlvoGuardado,
+          countdownMotivoInicial: _countdownMotivoGuardado,
+          todoBlocosJson: _todoBlocosGuardados,
+        );
       case EstadoApp.cronometro:
         return _TelaCronometro(state: this);
       case EstadoApp.fim:
@@ -691,6 +866,7 @@ class _MenuLateral extends StatelessWidget {
               if (resultado != null) {
                 // ignore: invalid_use_of_protected_member
                 state.setState(() => state.perfil = resultado);
+                state._guardarTudo();
               }
             },
           ),
@@ -776,21 +952,30 @@ class _MenuLateral extends StatelessWidget {
 
 class _TelaInicial extends StatefulWidget {
   final _PomodoroAppState state;
-  const _TelaInicial({required this.state});
+  final DateTime? countdownAlvoInicial;
+  final String? countdownMotivoInicial;
+  final String? todoBlocosJson;
+  const _TelaInicial({
+    required this.state,
+    this.countdownAlvoInicial,
+    this.countdownMotivoInicial,
+    this.todoBlocosJson,
+  });
   @override
   State<_TelaInicial> createState() => _TelaInicialState();
 }
 
 class _TelaInicialState extends State<_TelaInicial> {
-  // Countdown target — editable
-  DateTime _alvo = DateTime.now().add(const Duration(days: 47, hours: 9, minutes: 57));
-  String _motivoAlvo = 'Exame';
+  late DateTime _alvo;
+  late String _motivoAlvo;
   Timer? _tickTimer;
 
   @override
   void initState() {
     super.initState();
-    // Refresh every minute so countdown stays live
+    _alvo = widget.countdownAlvoInicial ??
+        DateTime.now().add(const Duration(days: 47, hours: 9, minutes: 57));
+    _motivoAlvo = widget.countdownMotivoInicial ?? 'Exame';
     _tickTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
@@ -871,6 +1056,10 @@ class _TelaInicialState extends State<_TelaInicial> {
       _alvo = novoAlvo;
       if (ctrl.text.trim().isNotEmpty) _motivoAlvo = ctrl.text.trim();
     });
+    // persist countdown
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_PomodoroAppState._kCountdown,
+        jsonEncode({'alvo': _alvo.toIso8601String(), 'motivo': _motivoAlvo}));
   }
 
   @override
@@ -1317,6 +1506,7 @@ class _TelaGerenciar extends StatelessWidget {
                   final item = state.tarefas.removeAt(oldIndex);
                   state.tarefas.insert(newIndex, item);
                 });
+                state._guardarTudo();
               },
               itemBuilder: (ctx, i) => _linhaGerenciar(ctx, i, tarefas[i]),
             ),
@@ -1392,6 +1582,7 @@ class _TelaGerenciar extends StatelessWidget {
               state.tarefas[index] = temp;
             }
           });
+          state._guardarTudo();
           Navigator.pop(ctx);
         },
       ),
@@ -2146,12 +2337,43 @@ class _TelaTodoState extends State<TelaTodo> {
   @override
   void initState() {
     super.initState();
-    // Inicializar restantes blocos vazios
     for (final key in _blocos.keys) {
       _blocos[key] = [];
     }
-    // Carregar itens existentes para o bloco inicial
-    _blocos['Tarefas para hoje']!.addAll(widget.lista);
+    _carregarBlocos();
+  }
+
+  static const _kTodoBlocos = 'todo_blocos_v1';
+
+  Future<void> _carregarBlocos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kTodoBlocos);
+    if (raw != null) {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      setState(() {
+        for (final entry in m.entries) {
+          if (_blocos.containsKey(entry.key)) {
+            final list = entry.value as List<dynamic>;
+            _blocos[entry.key] = list
+                .map((e) => ItemTodo.fromJson(e as Map<String, dynamic>))
+                .toList();
+          }
+        }
+      });
+    } else {
+      // Primeira vez — migrar lista antiga
+      setState(() => _blocos['Tarefas para hoje']!.addAll(widget.lista));
+      await _guardarBlocos();
+    }
+  }
+
+  Future<void> _guardarBlocos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final m = <String, dynamic>{};
+    for (final entry in _blocos.entries) {
+      m[entry.key] = entry.value.map((i) => i.toJson()).toList();
+    }
+    await prefs.setString(_kTodoBlocos, jsonEncode(m));
   }
 
   @override
@@ -2180,6 +2402,7 @@ class _TelaTodoState extends State<TelaTodo> {
       _horaCtrl.clear();
       _dataCtrl.clear();
     });
+    _guardarBlocos();
   }
 
   void _moverItem(ItemTodo item, String destino) {
@@ -2190,6 +2413,7 @@ class _TelaTodoState extends State<TelaTodo> {
       item.concluido = destino == 'Acabadas';
       _blocos[destino]!.add(item);
     });
+    _guardarBlocos();
   }
 
   void _removerItem(ItemTodo item) {
@@ -2198,18 +2422,18 @@ class _TelaTodoState extends State<TelaTodo> {
         lista.removeWhere((i) => i.id == item.id);
       }
     });
+    _guardarBlocos();
   }
 
   void _alternarConcluido(ItemTodo item) {
     setState(() {
       item.concluido = !item.concluido;
-      // Remover do bloco atual
       for (final lista in _blocos.values) {
         lista.removeWhere((i) => i.id == item.id);
       }
-      // Mover para bloco adequado
       _blocos[item.concluido ? 'Acabadas' : 'Por fazer!!']!.add(item);
     });
+    _guardarBlocos();
   }
 
   Future<void> _selecionarData() async {
@@ -3480,6 +3704,7 @@ class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
                             t.estavaNoDescanso = false;
                             t.segundosSalvos = t.estudo;
                           });
+                          widget.state._guardarTudo();
                           setState(() {});
                         },
                       ),
@@ -3494,6 +3719,7 @@ class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
                               widget.state.ultimaTarefa = null;
                             }
                           });
+                          widget.state._guardarTudo();
                           setState(() {});
                         },
                       ),
