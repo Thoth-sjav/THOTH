@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -10,6 +13,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
 Future<void> main() async {
@@ -1636,7 +1641,58 @@ class _StreakDialog extends StatelessWidget {
                 ),
               );
             }),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            // ── Botão partilhar streak ──────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  final keyStreakCard = GlobalKey();
+                  final texto = [
+                    '🔥 $dias ${dias == 1 ? 'dia' : 'dias'} de estudo seguidos no THOTH!',
+                    streak.acendeuHoje ? 'Streak activa hoje! 💪' : 'A minha streak de estudo',
+                    '',
+                    '#Thoth #Streak #Produtividade #Estudo',
+                  ].join('\n');
+                  showDialog(
+                    context: context,
+                    builder: (_) => _DialogoPartilha(
+                      textoPartilha: texto,
+                      cartao: RepaintBoundary(
+                        key: keyStreakCard,
+                        child: _StreakShareCard(
+                          dias: dias,
+                          acendeuHoje: streak.acendeuHoje,
+                          conquistas: StreakInfo.conquistas,
+                        ),
+                      ),
+                      aoPartilhar: () async {
+                        await _registarPartilhaFirestore(
+                          tipo: 'streak',
+                          streakDias: dias,
+                          totalFoco: 0,
+                          totalCiclos: 0,
+                          totalSessoes: 0,
+                        );
+                        await _partilharImagem(key: keyStreakCard, texto: texto);
+                      },
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.ios_share_rounded, size: 16, color: Color(0xFFFF6D00)),
+                label: const Text(
+                  'Partilhar streak',
+                  style: TextStyle(color: Color(0xFFFF6D00)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: Color(0x66FF6D00)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Fechar', style: TextStyle(color: azul)),
@@ -3578,83 +3634,53 @@ class TelaInsights extends StatelessWidget {
   }
 
   void _partilhar(BuildContext context, StreakInfo streak, int totalFoco, int totalCiclos, int totalSessoes) {
-    const azul = Color(0xFF1D81C7);
+    final keyInsights = GlobalKey();
+
+    // Tarefa mais estudada
+    final contagem = <String, int>{};
+    for (final s in sessoes) {
+      contagem[s.tarefaNome] = (contagem[s.tarefaNome] ?? 0) + s.tempoFocoSegundos;
+    }
+    String? tarefaMaisEstudada;
+    if (contagem.isNotEmpty) {
+      tarefaMaisEstudada = contagem.entries.reduce((a, b) => a.value > b.value ? a : b).key;
+    }
+
+    final texto = [
+      '🔥 ${streak.dias} dias de streak no THOTH!',
+      '⏱ ${_formatarTempo(totalFoco)} de foco total',
+      '🔁 $totalCiclos ciclos concluídos',
+      '✅ $totalSessoes sessões completadas',
+      '',
+      '#Thoth #Produtividade #Estudo #Pomodoro',
+    ].join('\n');
+
     showDialog(
       context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: temaEscuro.value ? const Color(0xFF0A0A0A) : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: azul.withOpacity(0.3)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Card de partilha (estilo Duolingo)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: temaEscuro.value ? const Color(0xFF111111) : const Color(0xFFF5F9FF),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: azul.withOpacity(0.2)),
-                ),
-                child: Column(
-                  children: [
-                    const Text('T H O T H', style: TextStyle(color: azul, fontSize: 13, letterSpacing: 4, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _shareStatCol('🔥', '${streak.dias}', 'streak'),
-                        _shareStatCol('⏱', _formatarTempo(totalFoco), 'foco total'),
-                        _shareStatCol('🔁', '$totalCiclos', 'ciclos'),
-                        _shareStatCol('✅', '$totalSessoes', 'sessões'),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    if (streak.dias > 0) ...[
-                      // Conquistas desbloqueadas
-                      Wrap(
-                        spacing: 6,
-                        children: StreakInfo.conquistas
-                            .where((c) => streak.dias >= (c['dias'] as int))
-                            .map((c) => Text(c['icon'] as String, style: const TextStyle(fontSize: 20)))
-                            .toList(),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Copia este cartão e partilha com os teus amigos!',
-                style: TextStyle(color: _tc54(), fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Fechar', style: TextStyle(color: azul)),
-              ),
-            ],
+      builder: (_) => _DialogoPartilha(
+        textoPartilha: texto,
+        cartao: RepaintBoundary(
+          key: keyInsights,
+          child: _InsightsShareCard(
+            streakDias: streak.dias,
+            acendeuHoje: streak.acendeuHoje,
+            totalFocoSegundos: totalFoco,
+            totalCiclos: totalCiclos,
+            totalSessoes: totalSessoes,
+            tarefaMaisEstudada: tarefaMaisEstudada,
           ),
         ),
+        aoPartilhar: () async {
+          await _registarPartilhaFirestore(
+            tipo: 'insights',
+            streakDias: streak.dias,
+            totalFoco: totalFoco,
+            totalCiclos: totalCiclos,
+            totalSessoes: totalSessoes,
+          );
+          await _partilharImagem(key: keyInsights, texto: texto);
+        },
       ),
-    );
-  }
-
-  Widget _shareStatCol(String emoji, String valor, String label) {
-    return Column(
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 22)),
-        const SizedBox(height: 4),
-        Text(valor, style: TextStyle(color: _tc(), fontSize: 16, fontWeight: FontWeight.bold)),
-        Text(label, style: TextStyle(color: _tc54(), fontSize: 10)),
-      ],
     );
   }
 
@@ -4848,6 +4874,609 @@ class _TelaAmigosState extends State<TelaAmigos> {
       ],
     );
   }
+}
+
+// =============================================================================
+// PARTILHA — FUNÇÕES GLOBAIS DE APOIO
+// =============================================================================
+
+/// Captura o widget referenciado por [key] como PNG e abre o share sheet nativo.
+Future<void> _partilharImagem({
+  required GlobalKey key,
+  required String texto,
+  double pixelRatio = 3.0,
+}) async {
+  try {
+    final boundary =
+        key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) return;
+    final pngBytes = byteData.buffer.asUint8List();
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
+    await file.writeAsBytes(pngBytes);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'image/png')],
+      text: texto,
+      subject: 'THOTH – O meu progresso de estudo',
+    );
+  } catch (e) {
+    debugPrint('Erro ao partilhar imagem: $e');
+  }
+}
+
+/// Regista a partilha na coleção Firestore users/{uid}/partilhas/
+Future<void> _registarPartilhaFirestore({
+  required String tipo,
+  required int streakDias,
+  required int totalFoco,
+  required int totalCiclos,
+  required int totalSessoes,
+}) async {
+  try {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('partilhas')
+        .add({
+      'tipo': tipo,
+      'streakDias': streakDias,
+      'totalFocoSegundos': totalFoco,
+      'totalCiclos': totalCiclos,
+      'totalSessoes': totalSessoes,
+      'criadaEm': FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    debugPrint('Erro ao registar partilha: $e');
+  }
+}
+
+// =============================================================================
+// DIÁLOGO DE PARTILHA
+// =============================================================================
+
+class _DialogoPartilha extends StatefulWidget {
+  final Widget cartao;
+  final String textoPartilha;
+  final Future<void> Function() aoPartilhar;
+
+  const _DialogoPartilha({
+    required this.cartao,
+    required this.textoPartilha,
+    required this.aoPartilhar,
+  });
+
+  @override
+  State<_DialogoPartilha> createState() => _DialogoPartilhaState();
+}
+
+class _DialogoPartilhaState extends State<_DialogoPartilha> {
+  bool _aPartilhar = false;
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Preview do cartão
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.60,
+            ),
+            child: AspectRatio(
+              aspectRatio: 9 / 16,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: widget.cartao,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Optimizado para Instagram Stories e TikTok',
+            style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 0.5),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: azul,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _aPartilhar
+                  ? null
+                  : () async {
+                      setState(() => _aPartilhar = true);
+                      await widget.aoPartilhar();
+                      if (mounted) Navigator.pop(context);
+                    },
+              icon: _aPartilhar
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.ios_share_rounded, size: 18),
+              label: Text(
+                _aPartilhar ? 'A guardar…' : 'Partilhar',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white38, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// CARTÃO DE STREAK  (formato story 9:16)
+// =============================================================================
+
+class _StreakShareCard extends StatelessWidget {
+  final int dias;
+  final bool acendeuHoje;
+  final List<Map<String, dynamic>> conquistas;
+  final String? nomeUtilizador;
+
+  const _StreakShareCard({
+    required this.dias,
+    required this.acendeuHoje,
+    this.conquistas = const [],
+    this.nomeUtilizador,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const laranja = Color(0xFFFF6D00);
+    const amarelo = Color(0xFFFFCC02);
+    const azul = Color(0xFF1D81C7);
+    const fundo = Color(0xFF080C12);
+
+    return Container(
+      color: fundo,
+      child: Stack(
+        children: [
+          // Gradiente de fundo
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: acendeuHoje
+                    ? [laranja.withOpacity(0.18), fundo, fundo, azul.withOpacity(0.10)]
+                    : [azul.withOpacity(0.12), fundo, fundo, azul.withOpacity(0.06)],
+              ),
+            ),
+          ),
+          // Anel decorativo
+          Positioned(
+            right: -80,
+            top: -60,
+            child: Container(
+              width: 300, height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: (acendeuHoje ? laranja : azul).withOpacity(0.07),
+                  width: 60,
+                ),
+              ),
+            ),
+          ),
+          // Partículas
+          ..._buildParticulas(acendeuHoje ? laranja : azul),
+          // Conteúdo
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Logo
+                _ShareLogo(),
+                const Spacer(flex: 2),
+                // Número de streak gigante
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '🔥',
+                      style: TextStyle(
+                        fontSize: 52,
+                        shadows: acendeuHoje
+                            ? [Shadow(color: laranja.withOpacity(0.6), blurRadius: 20)]
+                            : [],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ShaderMask(
+                          shaderCallback: (bounds) => LinearGradient(
+                            colors: acendeuHoje
+                                ? [amarelo, laranja]
+                                : [Colors.white, Colors.white70],
+                          ).createShader(bounds),
+                          child: Text(
+                            '$dias',
+                            style: const TextStyle(
+                              fontSize: 80,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              height: 0.9,
+                            ),
+                          ),
+                        ),
+                        const Text(
+                          'dias',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w300,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  dias == 1 ? '1 dia de estudo seguido' : '$dias dias de estudo seguidos',
+                  style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w300),
+                ),
+                if (acendeuHoje) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: laranja.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: laranja.withOpacity(0.4)),
+                    ),
+                    child: const Text(
+                      'Streak activa hoje! 💪',
+                      style: TextStyle(color: laranja, fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+                const Spacer(flex: 1),
+                // Conquistas desbloqueadas
+                if (conquistas.where((c) => dias >= (c['dias'] as int)).isNotEmpty) ...[
+                  const Text(
+                    'CONQUISTAS DESBLOQUEADAS',
+                    style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 2, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: conquistas
+                        .where((c) => dias >= (c['dias'] as int))
+                        .map((c) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: laranja.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: laranja.withOpacity(0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(c['icon'] as String, style: const TextStyle(fontSize: 14)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    c['label'] as String,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ],
+                const Spacer(flex: 2),
+                // Rodapé
+                _ShareRodape(nomeUtilizador: nomeUtilizador),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildParticulas(Color cor) {
+    final posicoes = [
+      const Offset(0.85, 0.12), const Offset(0.10, 0.25),
+      const Offset(0.92, 0.40), const Offset(0.05, 0.60),
+      const Offset(0.80, 0.75), const Offset(0.20, 0.88),
+    ];
+    return posicoes.asMap().entries.map((e) {
+      final r = e.key % 2 == 0 ? 3.0 : 1.5;
+      return Positioned.fill(
+        child: FractionallySizedBox(
+          alignment: Alignment(e.value.dx * 2 - 1, e.value.dy * 2 - 1),
+          widthFactor: 0.0,
+          heightFactor: 0.0,
+          child: Container(
+            width: r * 2, height: r * 2,
+            decoration: BoxDecoration(
+              color: cor.withOpacity(0.20),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
+}
+
+// =============================================================================
+// CARTÃO DE INSIGHTS (formato story 9:16)
+// =============================================================================
+
+class _InsightsShareCard extends StatelessWidget {
+  final int streakDias;
+  final bool acendeuHoje;
+  final int totalFocoSegundos;
+  final int totalCiclos;
+  final int totalSessoes;
+  final String? tarefaMaisEstudada;
+  final String? nomeUtilizador;
+
+  const _InsightsShareCard({
+    required this.streakDias,
+    required this.acendeuHoje,
+    required this.totalFocoSegundos,
+    required this.totalCiclos,
+    required this.totalSessoes,
+    this.tarefaMaisEstudada,
+    this.nomeUtilizador,
+  });
+
+  String get _tempoFormatado {
+    final h = totalFocoSegundos ~/ 3600;
+    final m = (totalFocoSegundos % 3600) ~/ 60;
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    const laranja = Color(0xFFFF6D00);
+    const fundo = Color(0xFF080C12);
+
+    return Container(
+      color: fundo,
+      child: Stack(
+        children: [
+          // Gradiente
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [azul.withOpacity(0.14), fundo, fundo, const Color(0xFF0A1A2E)],
+              ),
+            ),
+          ),
+          // Grade decorativa subtil
+          Positioned.fill(
+            child: CustomPaint(painter: _GradePainter()),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ShareLogo(),
+                const SizedBox(height: 6),
+                const Text(
+                  'OS MEUS INSIGHTS DE ESTUDO',
+                  style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 1.5),
+                ),
+                const Spacer(flex: 1),
+                // Streak destaque
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [laranja.withOpacity(0.15), laranja.withOpacity(0.05)],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: laranja.withOpacity(0.35)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('🔥', style: TextStyle(fontSize: 28)),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$streakDias ${streakDias == 1 ? 'dia' : 'dias'} de streak',
+                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            acendeuHoje ? 'Streak activa hoje! 💪' : 'Continua a estudar!',
+                            style: const TextStyle(color: Colors.white54, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Grelha de stats
+                Row(
+                  children: [
+                    Expanded(child: _ShareStatBox(emoji: '⏱', valor: _tempoFormatado, label: 'foco total', destaque: true)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _ShareStatBox(emoji: '🔁', valor: '$totalCiclos', label: 'ciclos')),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _ShareStatBox(emoji: '✅', valor: '$totalSessoes', label: 'sessões')),
+                    const SizedBox(width: 10),
+                    Expanded(child: _ShareStatBox(
+                      emoji: '🎯',
+                      valor: tarefaMaisEstudada ?? '—',
+                      label: 'mais estudada',
+                      pequeno: true,
+                    )),
+                  ],
+                ),
+                const Spacer(flex: 2),
+                _ShareRodape(nomeUtilizador: nomeUtilizador),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// COMPONENTES PARTILHADOS DOS CARTÕES
+// =============================================================================
+
+class _ShareLogo extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.6)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'THOTH',
+        style: TextStyle(
+          color: Color(0xFF1D81C7),
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 3,
+        ),
+      ),
+    );
+  }
+}
+
+class _ShareRodape extends StatelessWidget {
+  final String? nomeUtilizador;
+  const _ShareRodape({this.nomeUtilizador});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 6, height: 6,
+              decoration: const BoxDecoration(color: Color(0xFF1D81C7), shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            const Text('thoth.app', style: TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 1)),
+          ],
+        ),
+        if (nomeUtilizador != null && nomeUtilizador!.isNotEmpty)
+          Text('@$nomeUtilizador', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+      ],
+    );
+  }
+}
+
+class _ShareStatBox extends StatelessWidget {
+  final String emoji;
+  final String valor;
+  final String label;
+  final bool destaque;
+  final bool pequeno;
+
+  const _ShareStatBox({
+    required this.emoji,
+    required this.valor,
+    required this.label,
+    this.destaque = false,
+    this.pequeno = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: destaque ? azul.withOpacity(0.12) : Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: destaque ? azul.withOpacity(0.5) : Colors.white.withOpacity(0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 6),
+          Text(
+            valor,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: pequeno ? 13 : 22,
+              fontWeight: FontWeight.bold,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
+}
+
+class _GradePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF1D81C7).withOpacity(0.04)
+      ..strokeWidth = 1;
+    const step = 40.0;
+    for (double x = 0; x < size.width; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = 0; y < size.height; y += step) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // =============================================================================
