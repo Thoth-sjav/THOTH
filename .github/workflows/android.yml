@@ -29,14 +29,25 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Print Debug Keystore SHA-1
+      - name: Create debug keystore and print SHA-1
         run: |
+          mkdir -p ~/.android
+          keytool -genkeypair -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "========== SHA-1 PARA O FIREBASE =========="
           keytool -list -v \
             -keystore ~/.android/debug.keystore \
             -alias androiddebugkey \
             -storepass android \
             -keypass android \
-            | grep -A1 "SHA1:"
+            | grep "SHA1:"
+          echo "==========================================="
 
       - name: Flutter Version
         run: flutter --version
