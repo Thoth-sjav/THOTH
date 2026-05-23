@@ -32,10 +32,10 @@ jobs:
       - name: Setup Keystore
         run: |
           mkdir -p ~/.android
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /home/runner/thoth-release.jks
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
           echo "========== SHA-1 DO KEYSTORE =========="
           keytool -list -v \
-            -keystore /home/runner/thoth-release.jks \
+            -keystore ~/.android/debug.keystore \
             -alias androiddebugkey \
             -storepass android \
             -keypass android \
@@ -52,38 +52,17 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
+        run: flutter build apk --release
+
+      - name: Print SHA-1 of compiled APK
         run: |
-          flutter build apk --release \
-            --dart-define=KEYSTORE_PATH=/home/runner/thoth-release.jks
-        env:
-          KEYSTORE_PATH: /home/runner/thoth-release.jks
-          KEYSTORE_PASSWORD: android
-          KEY_ALIAS: androiddebugkey
-          KEY_PASSWORD: android
-
-      - name: Sign APK manually
-        run: |
-          APK_UNSIGNED=build/app/outputs/flutter-apk/app-release.apk
-          APK_SIGNED=build/app/outputs/flutter-apk/app-release-signed.apk
-
-          # Remove old signature
-          cp $APK_UNSIGNED $APK_SIGNED
-
-          # Sign with our keystore
-          jarsigner -verbose \
-            -sigalg SHA256withRSA \
-            -digestalg SHA-256 \
-            -keystore /home/runner/thoth-release.jks \
-            -storepass android \
-            -keypass android \
-            $APK_SIGNED androiddebugkey
-
-          echo "========== SHA-1 DO APK ASSINADO =========="
-          keytool -printcert -jarfile $APK_SIGNED | grep "SHA1:"
-          echo "============================================"
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          echo "========== SHA-1 DO APK COMPILADO =========="
+          keytool -printcert -jarfile $APK | grep "SHA1:"
+          echo "============================================="
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
-          path: build/app/outputs/flutter-apk/app-release-signed.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
