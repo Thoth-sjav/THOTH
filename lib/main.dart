@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -15,13 +16,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+import 'dart:io' show File, Directory, Platform;
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:window_manager/window_manager.dart';
 
 import 'firebase_options.dart';
+
+// ─── Helpers de plataforma ───────────────────────────────────────────────────
+bool get _isDesktop =>
+    !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
 
 // ─── Notificações globais ────────────────────────────────────────────────────
 final FlutterLocalNotificationsPlugin _notifPlugin =
@@ -44,18 +50,29 @@ final List<String> _mensagensNotif = [
 Future<void> _inicializarNotificacoes() async {
   tz.initializeTimeZones();
 
+  // Windows/Linux não têm suporte nativo; macOS tem via DarwinInitializationSettings
+  if (_isDesktop && !Platform.isMacOS) return;
+
   const android = AndroidInitializationSettings('@mipmap/ic_launcher');
   const ios = DarwinInitializationSettings(
     requestAlertPermission: true,
     requestBadgePermission: true,
     requestSoundPermission: true,
   );
+  const macos = DarwinInitializationSettings(
+    requestAlertPermission: true,
+    requestBadgePermission: true,
+    requestSoundPermission: true,
+  );
   await _notifPlugin.initialize(
-    const InitializationSettings(android: android, iOS: ios),
+    const InitializationSettings(android: android, iOS: ios, macOS: macos),
   );
 }
 
 Future<void> _agendarNotificacaoDiaria() async {
+  // Notificações agendadas não suportadas em Windows/Linux via este plugin
+  if (_isDesktop && !Platform.isMacOS) return;
+
   await _notifPlugin.cancelAll();
 
   final rand = math.Random();
@@ -99,10 +116,31 @@ Future<void> main() async {
 
   await _inicializarNotificacoes();
 
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+  // Orientação só faz sentido em mobile
+  if (!_isDesktop && !kIsWeb) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+  }
+
+  // Configuração da janela desktop (Windows / macOS / Linux)
+  if (_isDesktop) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      size: Size(1024, 720),
+      minimumSize: Size(800, 600),
+      center: true,
+      title: 'THOTH – Study Helper',
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(const ThothApp());
 }
@@ -384,6 +422,18 @@ class ThothApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Thoth',
         theme: _buildTheme(escuro),
+        builder: (context, child) {
+          // Em desktop, centra o conteúdo com largura máxima estilo mobile
+          if (_isDesktop && child != null) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: child,
+              ),
+            );
+          }
+          return child ?? const SizedBox.shrink();
+        },
         home: const AuthGate(),
       ),
     );
@@ -2788,6 +2838,15 @@ class _TelaPerfilState extends State<TelaPerfil> {
   }
 
   Future<void> _escolherFoto() async {
+    // Em desktop não há câmara, vamos direto para o file picker
+    if (_isDesktop) {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 512);
+      if (picked == null || !mounted) return;
+      setState(() => _fotoLocal = File(picked.path));
+      return;
+    }
+
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: const Color(0xFF111111),
@@ -5238,9 +5297,11 @@ class _TelaAmigosState extends State<TelaAmigos> {
 // =============================================================================
 
 /// Captura o widget referenciado por [key] como PNG e abre o share sheet nativo.
+/// Em desktop, guarda o ficheiro na pasta Downloads e mostra um SnackBar.
 Future<void> _partilharImagem({
   required GlobalKey key,
   required String texto,
+  BuildContext? context,
   double pixelRatio = 3.0,
 }) async {
   try {
@@ -5251,6 +5312,23 @@ Future<void> _partilharImagem({
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) return;
     final pngBytes = byteData.buffer.asUint8List();
+
+    if (_isDesktop) {
+      // Em desktop: guardar na pasta Downloads
+      final dir = await getDownloadsDirectory() ?? await getTemporaryDirectory();
+      final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(pngBytes);
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Imagem guardada em ${file.path}'),
+            backgroundColor: const Color(0xFF1D81C7),
+          ),
+        );
+      }
+      return;
+    }
+
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
     await file.writeAsBytes(pngBytes);
