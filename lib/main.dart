@@ -29,7 +29,7 @@ final FlutterLocalNotificationsPlugin _notifPlugin =
     FlutterLocalNotificationsPlugin();
 
 // Mensagens passivo-agressivas estilo Duolingo
-const List<String> _mensagensNotif = [
+final List<String> _mensagensNotif = [
   'Já estudaste hoje? Não? Tá bem... o teu futuro self que se desenrasque.',
   'O teu rival já estudou 2h hoje. Tu não. Parabéns.',
   'Lembras-te dos teus sonhos? O THOTH também. Vai estudar.',
@@ -85,6 +85,8 @@ Future<void> _agendarNotificacaoDiaria() async {
       iOS: DarwinNotificationDetails(),
     ),
     androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation.absoluteTime,
     matchDateTimeComponents: DateTimeComponents.time,
   );
 }
