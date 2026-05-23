@@ -17,10 +17,86 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+import 'firebase_options.dart';
+
+// ─── Notificações globais ────────────────────────────────────────────────────
+final FlutterLocalNotificationsPlugin _notifPlugin =
+    FlutterLocalNotificationsPlugin();
+
+// Mensagens passivo-agressivas estilo Duolingo
+const List<String> _mensagensNotif = [
+  'Já estudaste hoje? Não? Tá bem... o teu futuro self que se desenrasque.',
+  'O teu rival já estudou 2h hoje. Tu não. Parabéns.',
+  'Lembras-te dos teus sonhos? O THOTH também. Vai estudar.',
+  'Hoje não estudaste nada. Impressionante, mas não da boa maneira.',
+  'Notificação número ${DateTime.now().day} sem estudares. Recorde pessoal?',
+  'Thoth, deus egípcio do saber, chora ao ver o teu progresso.',
+  'Sugestão: em vez de ignorar esta notificação, abre o app. Só uma vez.',
+  'A tua mãe perguntou como vai o estudo. Não respondas.',
+  'Esta notificação é mais produtiva do que tu hoje. Triste.',
+  'Foste a algum lado menos estudar. Parabéns pela criatividade.',
+];
+
+Future<void> _inicializarNotificacoes() async {
+  tz.initializeTimeZones();
+
+  const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const ios = DarwinInitializationSettings(
+    requestAlertPermission: true,
+    requestBadgePermission: true,
+    requestSoundPermission: true,
+  );
+  await _notifPlugin.initialize(
+    const InitializationSettings(android: android, iOS: ios),
+  );
+}
+
+Future<void> _agendarNotificacaoDiaria() async {
+  await _notifPlugin.cancelAll();
+
+  final rand = math.Random();
+  final msg = _mensagensNotif[rand.nextInt(_mensagensNotif.length)];
+
+  // Agenda para as 20h todos os dias
+  final agora = tz.TZDateTime.now(tz.local);
+  var agendado = tz.TZDateTime(tz.local, agora.year, agora.month, agora.day, 20, 0);
+  if (agendado.isBefore(agora)) {
+    agendado = agendado.add(const Duration(days: 1));
+  }
+
+  await _notifPlugin.zonedSchedule(
+    0,
+    'Thoth está à tua espera 📚',
+    msg,
+    agendado,
+    const NotificationDetails(
+      android: AndroidNotificationDetails(
+        'thoth_daily',
+        'Estudo Diário',
+        channelDescription: 'Lembrete diário para estudar',
+        importance: Importance.high,
+        priority: Priority.high,
+      ),
+      iOS: DarwinNotificationDetails(),
+    ),
+    androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    matchDateTimeComponents: DateTimeComponents.time,
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  await _inicializarNotificacoes();
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -536,6 +612,9 @@ class _PomodoroAppState extends State<PomodoroApp>
   bool pausado = false;
   bool _primeiraVez = true;
 
+  // Loading state
+  bool _aCarregarDados = true;
+
   // ---------------------------------------------------------------------------
   // CICLO DE VIDA
   // ---------------------------------------------------------------------------
@@ -630,61 +709,68 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _carregarDados() async {
-    // Config (tema + countdown)
-    final configSnap = await _configDoc.get();
-    if (configSnap.exists) {
-      final d = configSnap.data() as Map<String, dynamic>;
-      if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
-      if (d['countdownAlvo'] != null) {
-        _countdownAlvoGuardado = DateTime.tryParse(d['countdownAlvo'] as String);
-      }
-      if (d['countdownMotivo'] != null) {
-        _countdownMotivoGuardado = d['countdownMotivo'] as String;
-      }
-    }
-
-    // Perfil
-    final perfilSnap = await _perfilDoc.get();
-    if (perfilSnap.exists) {
-      perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
-    }
-
-    // Tarefas
-    final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
-    tarefas = tarefasSnap.docs
-        .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
-        .toList();
-
-    // Ultima tarefa
-    final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
-    final ultimaId = configData['ultimaTarefaId'] as String?;
-    if (ultimaId != null) {
-      try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
-    }
-
-    // Sessões
-    final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
-    sessoes = sessoesSnap.docs
-        .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
-        .toList();
-
-    // Todo blocos — lidos em TelaTodo via Firestore diretamente
-    // Guardamos snapshot JSON para passar ao widget
-    final todoSnap = await _todoCol.get();
-    if (todoSnap.docs.isNotEmpty) {
-      final m = <String, dynamic>{};
-      for (final doc in todoSnap.docs) {
-        m[doc.id] = doc.data();
-      }
-      _todoBlocosGuardados = jsonEncode(m);
-    }
-
-    if (mounted) {
-      setState(() {});
-      // Restaurar timer que estava a correr (mesmo noutro dispositivo)
+    try {
+      // Config (tema + countdown)
+      final configSnap = await _configDoc.get();
       if (configSnap.exists) {
-        await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
+        final d = configSnap.data() as Map<String, dynamic>;
+        if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
+        if (d['countdownAlvo'] != null) {
+          _countdownAlvoGuardado = DateTime.tryParse(d['countdownAlvo'] as String);
+        }
+        if (d['countdownMotivo'] != null) {
+          _countdownMotivoGuardado = d['countdownMotivo'] as String;
+        }
       }
+
+      // Perfil
+      final perfilSnap = await _perfilDoc.get();
+      if (perfilSnap.exists) {
+        perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
+      }
+
+      // Tarefas
+      final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
+      tarefas = tarefasSnap.docs
+          .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
+          .toList();
+
+      // Ultima tarefa
+      final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
+      final ultimaId = configData['ultimaTarefaId'] as String?;
+      if (ultimaId != null) {
+        try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
+      }
+
+      // Sessões
+      final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
+      sessoes = sessoesSnap.docs
+          .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
+          .toList();
+
+      // Todo blocos — lidos em TelaTodo via Firestore diretamente
+      // Guardamos snapshot JSON para passar ao widget
+      final todoSnap = await _todoCol.get();
+      if (todoSnap.docs.isNotEmpty) {
+        final m = <String, dynamic>{};
+        for (final doc in todoSnap.docs) {
+          m[doc.id] = doc.data();
+        }
+        _todoBlocosGuardados = jsonEncode(m);
+      }
+
+      if (mounted) {
+        setState(() { _aCarregarDados = false; });
+        // Restaurar timer que estava a correr (mesmo noutro dispositivo)
+        if (configSnap.exists) {
+          await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
+        }
+        // Agendar notificação diária
+        _agendarNotificacaoDiaria();
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar dados do Firestore: $e');
+      if (mounted) setState(() { _aCarregarDados = false; });
     }
   }
 
@@ -838,6 +924,24 @@ class _PomodoroAppState extends State<PomodoroApp>
     return global.clamp(0.0, 1.0);
   }
 
+  void _tocarSom({bool fim = false}) {
+    try {
+      final player = AudioPlayer();
+      final asset = fim ? 'sounds/fim.mp3' : 'sounds/fase.mp3';
+      player.play(AssetSource(asset)).then((_) {
+        // liberar após terminar
+        Future.delayed(const Duration(seconds: 5), () => player.dispose());
+      }).catchError((_) {
+        // sem asset → vibração + som do sistema
+        HapticFeedback.mediumImpact();
+        SystemSound.play(SystemSoundType.click);
+      });
+    } catch (_) {
+      HapticFeedback.mediumImpact();
+      SystemSound.play(SystemSoundType.click);
+    }
+  }
+
   void _avancarFase() {
     if (tarefaAtual == null) return;
 
@@ -849,6 +953,7 @@ class _PomodoroAppState extends State<PomodoroApp>
         return;
       }
       // Ainda há ciclos → ir para descanso
+      _tocarSom();
       setState(() {
         estaNoDescanso = true;
         segundosRestantes = tarefaAtual!.descanso;
@@ -856,6 +961,7 @@ class _PomodoroAppState extends State<PomodoroApp>
       });
     } else {
       // Descanso acabou → próximo ciclo de estudo
+      _tocarSom();
       setState(() {
         cicloAtual++;
         estaNoDescanso = false;
@@ -890,6 +996,7 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   void finalizar() {
     _timer?.cancel();
+    _tocarSom(fim: true);
     if (tarefaAtual != null) {
       final t = tarefaAtual!;
       t
@@ -938,11 +1045,16 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   void removerTarefa(int index) {
+    final tarefaId = tarefas[index].id;
     setState(() {
       if (ultimaTarefa != null && tarefas[index].id == ultimaTarefa!.id) {
         ultimaTarefa = null;
       }
       tarefas.removeAt(index);
+    });
+    // Apagar documento do Firestore
+    _tarefasCol.doc(tarefaId).delete().catchError((e) {
+      debugPrint('Erro ao apagar tarefa: $e');
     });
     _guardarTudo();
   }
@@ -959,6 +1071,31 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   @override
   Widget build(BuildContext context) {
+    // Mostrar splash de carregamento enquanto os dados do Firestore chegam
+    if (_aCarregarDados) {
+      return ValueListenableBuilder<bool>(
+        valueListenable: temaEscuro,
+        builder: (_, escuro, __) => Scaffold(
+          backgroundColor: escuro ? Colors.black : Colors.white,
+          body: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('T h o t h',
+                    style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1D81C7),
+                        letterSpacing: 6)),
+                SizedBox(height: 32),
+                CircularProgressIndicator(color: Color(0xFF1D81C7)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     switch (estadoApp) {
       case EstadoApp.inicio:
         return _TelaInicial(
@@ -2700,6 +2837,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
             nomedeutilizador: _usernameCtrl.text.trim(),
             descricao: _descCtrl.text.trim(),
             motivos: _motivosCtrl.text.trim(),
+            citacao: widget.perfil.citacao, // preservar citação existente
             fotoUrl: fotoFinal,
           ),
         );
@@ -4075,6 +4213,14 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
   Future<void> _guardarPreferencia(String campo, bool valor) async {
     try {
       await _configDoc.set({campo: valor}, SetOptions(merge: true));
+      // Gerir notificações diárias conforme preferência
+      if (campo == 'notificacoes') {
+        if (valor) {
+          await _agendarNotificacaoDiaria();
+        } else {
+          await _notifPlugin.cancelAll();
+        }
+      }
     } catch (_) {}
   }
 
@@ -5613,6 +5759,7 @@ class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
                         tooltip: 'Eliminar definitivamente',
                         icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                         onPressed: () {
+                          final tarefaId = t.id;
                           // ignore: invalid_use_of_protected_member
                           widget.state.setState(() {
                             widget.state.tarefas.removeWhere((x) => x.id == t.id);
@@ -5620,6 +5767,9 @@ class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
                               widget.state.ultimaTarefa = null;
                             }
                           });
+                          // Apagar do Firestore
+                          widget.state._tarefasCol.doc(tarefaId).delete()
+                              .catchError((e) => debugPrint('Erro ao apagar tarefa: $e'));
                           widget.state._guardarTudo();
                           setState(() {});
                         },
