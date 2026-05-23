@@ -1,5 +1,5 @@
 name: thoth_final_final
-description: Thoth Study Helper
+description: Thoth Study Helper - Estude com inteligência, alcance seus objetivos
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -11,33 +11,41 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # UI & Icons
   cupertino_icons: ^1.0.6
 
-  # Firebase
+  # Firebase - Funciona em todas as plataformas
   firebase_core: ^3.8.0
   firebase_auth: ^5.3.3
   cloud_firestore: ^5.4.4
 
-  # Google Sign In
+  # Autenticação Google - Suportado em Android, iOS, Web, Desktop
   google_sign_in: ^6.2.1
 
-  # Foto de perfil
+  # Seleção de Imagens - Funciona em todas as plataformas
+  # Mobile: abre câmara nativa
+  # Desktop: abre diálogo de ficheiro
   image_picker: ^1.1.2
 
-  # Partilha para redes sociais (Instagram, TikTok, WhatsApp, etc.)
+  # Partilha - Funciona em todas as plataformas
   share_plus: ^10.1.4
 
-  # Diretório temporário para guardar imagem antes de partilhar
+  # Gestão de diretórios - Funciona em todas as plataformas
   path_provider: ^2.1.5
 
-  # Som ao terminar timer (vibração + som sistema)
-  # audioplayers removido — usar AssetSource requer ficheiros de som no projeto
-
-  # Notificações locais (tipo Duolingo)
+  # Notificações locais - Suportadas em todas as plataformas
+  # Android: Notificações do sistema
+  # iOS: Notificações do sistema
+  # macOS: Notificações do sistema
+  # Windows: Notificações do Windows 10+
+  # Linux: Notificações D-Bus
   flutter_local_notifications: ^18.0.1
 
-  # Timezone para agendar notificações
+  # Timezone para agendar notificações - Funciona em todas as plataformas
   timezone: ^0.9.4
+
+  # Opcional: Controlar janela (Windows, macOS, Linux)
+  window_manager: ^0.3.7
 
 dev_dependencies:
   flutter_test:
