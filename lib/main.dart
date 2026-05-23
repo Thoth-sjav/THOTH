@@ -206,31 +206,44 @@ class AuthGate extends StatelessWidget {
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
 
-  Future<void> signInWithGoogle() async {
-
-    final GoogleSignInAccount? googleUser =
-        await GoogleSignIn().signIn();
-
-    if (googleUser == null) return;
-
-    final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
-
-    final credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
-      idToken: googleAuth.idToken,
-    );
-
+  Future<void> signInWithGoogle(BuildContext context) async {
     try {
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        serverClientId:
+            '639767112265-bedturi5tv013dcd2q2ifmo1j0sv9k2h.apps.googleusercontent.com',
+      );
 
-  await FirebaseAuth.instance.signInWithCredential(
-    credential,
-  );
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
-} catch (e) {
+      if (googleUser == null) return; // utilizador cancelou
 
-  debugPrint(e.toString());
-}
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      if (googleAuth.idToken == null) {
+        debugPrint('ERRO: idToken é null. Verifica o SHA-1 no Firebase Console.');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Erro de autenticação. Tenta novamente.')),
+          );
+        }
+        return;
+      }
+
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      await FirebaseAuth.instance.signInWithCredential(credential);
+    } catch (e) {
+      debugPrint('Erro no login: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao entrar: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -241,7 +254,7 @@ class LoginPage extends StatelessWidget {
 
       body: Center(
         child: ElevatedButton.icon(
-          onPressed: signInWithGoogle,
+          onPressed: () => signInWithGoogle(context),
 
           icon: const Icon(Icons.login),
 
