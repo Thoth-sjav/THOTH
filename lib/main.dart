@@ -203,30 +203,41 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-class LoginPage extends StatelessWidget {
+class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
-  Future<void> signInWithGoogle(BuildContext context) async {
+  @override
+  State<LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<LoginPage> {
+  bool _loading = false;
+
+  Future<void> signInWithGoogle() async {
+    setState(() => _loading = true);
     try {
-      final GoogleSignIn googleSignIn = GoogleSignIn(
-        serverClientId:
-            '639767112265-bedturi5tv013dcd2q2ifmo1j0sv9k2h.apps.googleusercontent.com',
-      );
+      // Para Android: NÃO usar serverClientId — causa DEVELOPER_ERROR (código 10).
+      // O Web Client ID é lido automaticamente pelo google-services.json.
+      final GoogleSignIn googleSignIn = GoogleSignIn();
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
-      if (googleUser == null) return; // utilizador cancelou
+      if (googleUser == null) {
+        setState(() => _loading = false);
+        return;
+      }
 
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
 
       if (googleAuth.idToken == null) {
         debugPrint('ERRO: idToken é null. Verifica o SHA-1 no Firebase Console.');
-        if (context.mounted) {
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Erro de autenticação. Tenta novamente.')),
+            const SnackBar(content: Text('Erro de autenticação. Verifica a ligação e tenta novamente.')),
           );
         }
+        setState(() => _loading = false);
         return;
       }
 
@@ -236,34 +247,117 @@ class LoginPage extends StatelessWidget {
       );
 
       await FirebaseAuth.instance.signInWithCredential(credential);
+      // AuthGate deteta a mudança automaticamente
     } catch (e) {
       debugPrint('Erro no login: $e');
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Erro ao entrar: $e')),
         );
       }
+      setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
 
     return Scaffold(
       backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Logo / título
+                const Text(
+                  'T h o t h',
+                  style: TextStyle(
+                    fontSize: 42,
+                    fontWeight: FontWeight.bold,
+                    color: azul,
+                    letterSpacing: 6,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'S t u d y   H e l p e r',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white38,
+                    letterSpacing: 3,
+                  ),
+                ),
+                const SizedBox(height: 50),
 
-      body: Center(
-        child: ElevatedButton.icon(
-          onPressed: () => signInWithGoogle(context),
+                // Separador
+                Container(height: 1, color: Colors.white12),
+                const SizedBox(height: 50),
 
-          icon: const Icon(Icons.login),
+                // Bem-vindo
+                const Text(
+                  'Bem-vindo',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'Inicia sessão para começares a estudar',
+                  style: TextStyle(fontSize: 14, color: Colors.white54),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 40),
 
-          label: const Text('Entrar com Google'),
+                // Botão Sign In
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton.icon(
+                    onPressed: _loading ? null : signInWithGoogle,
+                    icon: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.login, color: Colors.white),
+                    label: Text(
+                      _loading ? 'A entrar...' : 'Sign In',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: azul,
+                      disabledBackgroundColor: azul.withOpacity(0.6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
 
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 30,
-              vertical: 18,
+                // Termos
+                const Text(
+                  'Ao entrar, aceitas os termos de utilização do Thoth',
+                  style: TextStyle(fontSize: 12, color: Colors.white24),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           ),
         ),
