@@ -216,9 +216,10 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> signInWithGoogle() async {
     setState(() => _loading = true);
     try {
-      // Para Android: NÃO usar serverClientId — causa DEVELOPER_ERROR (código 10).
-      // O Web Client ID é lido automaticamente pelo google-services.json.
-      final GoogleSignIn googleSignIn = GoogleSignIn();
+      // Web Client ID do Firebase Authentication → Sign-in method → Google → Web client ID
+      final GoogleSignIn googleSignIn = GoogleSignIn(
+        serverClientId: '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com',
+      );
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
 
