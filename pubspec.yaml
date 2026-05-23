@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-    
+
   cupertino_icons: ^1.0.6
 
   # Firebase
@@ -23,6 +23,12 @@ dependencies:
 
   # Foto de perfil
   image_picker: ^1.1.2
+
+  # Partilha para redes sociais (Instagram, TikTok, WhatsApp, etc.)
+  share_plus: ^10.1.4
+
+  # Diretório temporário para guardar imagem antes de partilhar
+  path_provider: ^2.1.5
 
 dev_dependencies:
   flutter_test:
