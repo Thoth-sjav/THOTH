@@ -1612,7 +1612,7 @@ class _TelaInicialState extends State<_TelaInicial> {
                           minimumSize: const Size(double.infinity, 55),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: const Text('GERENCIAR TAREFAS',
+                        child: const Text('GERIR TAREFAS',
                           style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
                       ),
                     ),
