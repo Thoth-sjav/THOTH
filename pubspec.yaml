@@ -30,8 +30,8 @@ dependencies:
   # Diretório temporário para guardar imagem antes de partilhar
   path_provider: ^2.1.5
 
-  # Som ao terminar timer
-  audioplayers: ^6.1.0
+  # Som ao terminar timer (vibração + som sistema)
+  # audioplayers removido — usar AssetSource requer ficheiros de som no projeto
 
   # Notificações locais (tipo Duolingo)
   flutter_local_notifications: ^18.0.1
@@ -47,6 +47,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
-  assets:
-    - assets/sounds/
