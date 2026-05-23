@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -472,81 +472,102 @@ class _PomodoroAppState extends State<PomodoroApp>
   // CICLO DE VIDA
   // ---------------------------------------------------------------------------
 
-  // ── Persistence helpers ────────────────────────────────────────────────────
-  static const _kTarefas    = 'tarefas_v1';
-  static const _kTodo       = 'todo_blocos_v1';
-  static const _kSessoes    = 'sessoes_v1';
-  static const _kPerfil     = 'perfil_v1';
-  static const _kUltima     = 'ultima_tarefa_v1';
-  static const _kTema       = 'tema_escuro_v1';
-  static const _kCountdown  = 'countdown_v1';
-
-  Future<void> _carregarDados() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    // Tema
-    final temaGuardado = prefs.getBool(_kTema);
-    if (temaGuardado != null) temaEscuro.value = temaGuardado;
-
-    // Tarefas
-    final tarefasJson = prefs.getString(_kTarefas);
-    if (tarefasJson != null) {
-      final list = jsonDecode(tarefasJson) as List<dynamic>;
-      tarefas = list.map((e) => Tarefa.fromJson(e as Map<String, dynamic>)).toList();
-    }
-
-    // Sessões
-    final sessoesJson = prefs.getString(_kSessoes);
-    if (sessoesJson != null) {
-      final list = jsonDecode(sessoesJson) as List<dynamic>;
-      sessoes = list.map((e) => SessaoConcluida.fromJson(e as Map<String, dynamic>)).toList();
-    }
-
-    // Perfil
-    final perfilJson = prefs.getString(_kPerfil);
-    if (perfilJson != null) {
-      perfil = PerfilUsuario.fromJson(jsonDecode(perfilJson) as Map<String, dynamic>);
-    }
-
-    // To-do blocos — guardados como mapa de bloco → lista de itens
-    final todoJson = prefs.getString(_kTodo);
-    _todoBlocosGuardados = todoJson;
-
-    // Última tarefa
-    final ultimaJson = prefs.getString(_kUltima);
-    if (ultimaJson != null) {
-      final id = ultimaJson;
-      try {
-        ultimaTarefa = tarefas.firstWhere((t) => t.id == id);
-      } catch (_) {}
-    }
-
-    // Countdown
-    final countdownJson = prefs.getString(_kCountdown);
-    if (countdownJson != null) {
-      final m = jsonDecode(countdownJson) as Map<String, dynamic>;
-      _countdownAlvoGuardado = DateTime.tryParse(m['alvo'] as String? ?? '');
-      _countdownMotivoGuardado = m['motivo'] as String?;
-    }
-
-    if (mounted) setState(() {});
-  }
+  // ── Firestore helpers ───────────────────────────────────────────────────────
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  DocumentReference get _configDoc  => _db.collection('users').doc(_uid).collection('config').doc('dados');
+  DocumentReference get _perfilDoc  => _db.collection('users').doc(_uid).collection('perfil').doc('dados');
+  CollectionReference get _tarefasCol => _db.collection('users').doc(_uid).collection('tarefas');
+  CollectionReference get _sessoesCol => _db.collection('users').doc(_uid).collection('sessoes');
+  CollectionReference get _todoCol    => _db.collection('users').doc(_uid).collection('todo');
 
   String? _todoBlocosGuardados;
   DateTime? _countdownAlvoGuardado;
   String? _countdownMotivoGuardado;
 
-  Future<void> _guardarTudo() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kTarefas, jsonEncode(tarefas.map((t) => t.toJson()).toList()));
-    await prefs.setString(_kSessoes, jsonEncode(sessoes.map((s) => s.toJson()).toList()));
-    await prefs.setString(_kPerfil, jsonEncode(perfil.toJson()));
-    await prefs.setBool(_kTema, temaEscuro.value);
-    if (ultimaTarefa != null) {
-      await prefs.setString(_kUltima, ultimaTarefa!.id);
-    } else {
-      await prefs.remove(_kUltima);
+  Future<void> _carregarDados() async {
+    // Config (tema + countdown)
+    final configSnap = await _configDoc.get();
+    if (configSnap.exists) {
+      final d = configSnap.data() as Map<String, dynamic>;
+      if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
+      if (d['countdownAlvo'] != null) {
+        _countdownAlvoGuardado = DateTime.tryParse(d['countdownAlvo'] as String);
+      }
+      if (d['countdownMotivo'] != null) {
+        _countdownMotivoGuardado = d['countdownMotivo'] as String;
+      }
     }
+
+    // Perfil
+    final perfilSnap = await _perfilDoc.get();
+    if (perfilSnap.exists) {
+      perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
+    }
+
+    // Tarefas
+    final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
+    tarefas = tarefasSnap.docs
+        .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
+        .toList();
+
+    // Ultima tarefa
+    final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
+    final ultimaId = configData['ultimaTarefaId'] as String?;
+    if (ultimaId != null) {
+      try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
+    }
+
+    // Sessões
+    final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
+    sessoes = sessoesSnap.docs
+        .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
+        .toList();
+
+    // Todo blocos — lidos em TelaTodo via Firestore diretamente
+    // Guardamos snapshot JSON para passar ao widget
+    final todoSnap = await _todoCol.get();
+    if (todoSnap.docs.isNotEmpty) {
+      final m = <String, dynamic>{};
+      for (final doc in todoSnap.docs) {
+        m[doc.id] = doc.data();
+      }
+      _todoBlocosGuardados = jsonEncode(m);
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _guardarTudo() async {
+    final batch = _db.batch();
+
+    // Config
+    batch.set(_configDoc, {
+      'temaEscuro': temaEscuro.value,
+      'ultimaTarefaId': ultimaTarefa?.id,
+      'countdownAlvo': _countdownAlvoGuardado?.toIso8601String(),
+      'countdownMotivo': _countdownMotivoGuardado,
+    }, SetOptions(merge: true));
+
+    // Perfil
+    batch.set(_perfilDoc, perfil.toJson(), SetOptions(merge: true));
+
+    // Tarefas — reescreve todas (lista pequena)
+    for (int i = 0; i < tarefas.length; i++) {
+      final t = tarefas[i];
+      final data = t.toJson();
+      data['ordem'] = i;
+      batch.set(_tarefasCol.doc(t.id), data);
+    }
+
+    await batch.commit();
+
+    // Sessões — só adiciona novas (não apaga)
+    // Guardamos separado para não exceder limite do batch (500 ops)
+  }
+
+  Future<void> _guardarSessao(SessaoConcluida s) async {
+    await _sessoesCol.add(s.toJson());
   }
 
   @override
@@ -555,9 +576,8 @@ class _PomodoroAppState extends State<PomodoroApp>
     WidgetsBinding.instance.addObserver(this);
     _carregarDados();
     // Guardar quando o tema muda
-    temaEscuro.addListener(() async {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kTema, temaEscuro.value);
+    temaEscuro.addListener(() {
+      _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
     });
   }
 
@@ -724,6 +744,7 @@ class _PomodoroAppState extends State<PomodoroApp>
     }
     setState(() => estadoApp = EstadoApp.fim);
     _guardarTudo();
+    if (sessoes.isNotEmpty) _guardarSessao(sessoes.last);
   }
 
   void reset() {
@@ -1057,9 +1078,12 @@ class _TelaInicialState extends State<_TelaInicial> {
       if (ctrl.text.trim().isNotEmpty) _motivoAlvo = ctrl.text.trim();
     });
     // persist countdown
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_PomodoroAppState._kCountdown,
-        jsonEncode({'alvo': _alvo.toIso8601String(), 'motivo': _motivoAlvo}));
+    widget.state._countdownAlvoGuardado = _alvo;
+    widget.state._countdownMotivoGuardado = _motivoAlvo;
+    widget.state._configDoc.set({
+      'countdownAlvo': _alvo.toIso8601String(),
+      'countdownMotivo': _motivoAlvo,
+    }, SetOptions(merge: true));
   }
 
   @override
@@ -2343,37 +2367,59 @@ class _TelaTodoState extends State<TelaTodo> {
     _carregarBlocos();
   }
 
-  static const _kTodoBlocos = 'todo_blocos_v1';
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  CollectionReference get _todoCol => _db.collection('users').doc(_uid).collection('todo');
 
   Future<void> _carregarBlocos() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kTodoBlocos);
-    if (raw != null) {
-      final m = jsonDecode(raw) as Map<String, dynamic>;
+    // Tentar dados passados do estado pai primeiro
+    if (widget.todoBlocosJson != null) {
+      final m = jsonDecode(widget.todoBlocosJson!) as Map<String, dynamic>;
       setState(() {
         for (final entry in m.entries) {
           if (_blocos.containsKey(entry.key)) {
-            final list = entry.value as List<dynamic>;
-            _blocos[entry.key] = list
+            final raw = entry.value;
+            if (raw is Map) {
+              // formato Firestore: {itens: [...]}
+              final list = (raw['itens'] as List<dynamic>?) ?? [];
+              _blocos[entry.key] = list
+                  .map((e) => ItemTodo.fromJson(e as Map<String, dynamic>))
+                  .toList();
+            }
+          }
+        }
+      });
+      return;
+    }
+    // Fallback: ler do Firestore diretamente
+    final snap = await _todoCol.get();
+    if (snap.docs.isNotEmpty) {
+      setState(() {
+        for (final doc in snap.docs) {
+          if (_blocos.containsKey(doc.id)) {
+            final data = doc.data() as Map<String, dynamic>;
+            final list = (data['itens'] as List<dynamic>?) ?? [];
+            _blocos[doc.id] = list
                 .map((e) => ItemTodo.fromJson(e as Map<String, dynamic>))
                 .toList();
           }
         }
       });
     } else {
-      // Primeira vez — migrar lista antiga
       setState(() => _blocos['Tarefas para hoje']!.addAll(widget.lista));
       await _guardarBlocos();
     }
   }
 
   Future<void> _guardarBlocos() async {
-    final prefs = await SharedPreferences.getInstance();
-    final m = <String, dynamic>{};
+    final batch = _db.batch();
     for (final entry in _blocos.entries) {
-      m[entry.key] = entry.value.map((i) => i.toJson()).toList();
+      batch.set(
+        _todoCol.doc(entry.key),
+        {'itens': entry.value.map((i) => i.toJson()).toList()},
+      );
     }
-    await prefs.setString(_kTodoBlocos, jsonEncode(m));
+    await batch.commit();
   }
 
   @override
