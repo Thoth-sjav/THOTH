@@ -2872,18 +2872,19 @@ class _TelaPerfilState extends State<TelaPerfil> {
     }
 
     setState(() => _aCarregarFoto = true);
+
     try {
       // Verificar unicidade do username (só se não estiver vazio)
       if (novoUsername.isNotEmpty) {
         final disponivel = await _usernameDisponivel(novoUsername);
         if (!disponivel) {
           if (mounted) {
+            setState(() => _aCarregarFoto = false);
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text('@$novoUsername já está em uso. Escolhe outro.'),
               backgroundColor: Colors.redAccent,
             ));
           }
-          setState(() => _aCarregarFoto = false);
           return;
         }
       }
@@ -2892,6 +2893,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
       if (_fotoLocal != null) {
         fotoFinal = await _uploadFoto(_fotoLocal!);
       }
+
       if (mounted) {
         Navigator.pop(
           context,
@@ -2908,13 +2910,12 @@ class _TelaPerfilState extends State<TelaPerfil> {
     } catch (e) {
       debugPrint('Erro ao guardar perfil: $e');
       if (mounted) {
+        setState(() => _aCarregarFoto = false);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Erro ao guardar. Tenta novamente.'),
           backgroundColor: Colors.redAccent,
         ));
       }
-    } finally {
-      if (mounted) setState(() => _aCarregarFoto = false);
     }
   }
 
