@@ -17,7 +17,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -928,20 +927,9 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   void _tocarSom({bool fim = false}) {
     try {
-      final player = AudioPlayer();
-      final asset = fim ? 'sounds/fim.mp3' : 'sounds/fase.mp3';
-      player.play(AssetSource(asset)).then((_) {
-        // liberar após terminar
-        Future.delayed(const Duration(seconds: 5), () => player.dispose());
-      }).catchError((_) {
-        // sem asset → vibração + som do sistema
-        HapticFeedback.mediumImpact();
-        SystemSound.play(SystemSoundType.click);
-      });
-    } catch (_) {
       HapticFeedback.mediumImpact();
       SystemSound.play(SystemSoundType.click);
-    }
+    } catch (_) {}
   }
 
   void _avancarFase() {
