@@ -2873,16 +2873,19 @@ class _TelaPerfilState extends State<TelaPerfil> {
 
     setState(() => _aCarregarFoto = true);
     try {
-      // Verificar unicidade do username
-      final disponivel = await _usernameDisponivel(novoUsername);
-      if (!disponivel) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('@$novoUsername já está em uso. Escolhe outro.'),
-            backgroundColor: Colors.redAccent,
-          ));
+      // Verificar unicidade do username (só se não estiver vazio)
+      if (novoUsername.isNotEmpty) {
+        final disponivel = await _usernameDisponivel(novoUsername);
+        if (!disponivel) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('@$novoUsername já está em uso. Escolhe outro.'),
+              backgroundColor: Colors.redAccent,
+            ));
+          }
+          setState(() => _aCarregarFoto = false);
+          return;
         }
-        return;
       }
 
       String fotoFinal = _fotoUrl;
@@ -2897,10 +2900,18 @@ class _TelaPerfilState extends State<TelaPerfil> {
             nomedeutilizador: novoUsername,
             descricao: _descCtrl.text.trim(),
             motivos: _motivosCtrl.text.trim(),
-            citacao: widget.perfil.citacao, // preservar citação existente
+            citacao: widget.perfil.citacao,
             fotoUrl: fotoFinal,
           ),
         );
+      }
+    } catch (e) {
+      debugPrint('Erro ao guardar perfil: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Erro ao guardar. Tenta novamente.'),
+          backgroundColor: Colors.redAccent,
+        ));
       }
     } finally {
       if (mounted) setState(() => _aCarregarFoto = false);
