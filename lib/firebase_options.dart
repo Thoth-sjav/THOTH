@@ -28,20 +28,11 @@ class DefaultFirebaseOptions {
           'you can reconfigure this by running the FlutterFire CLI again.',
         );
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return macos;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows;
       case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return windows; // Linux usa as mesmas credenciais que Windows
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
@@ -67,5 +58,27 @@ class DefaultFirebaseOptions {
     projectId: 'thoth-a5c7a',
     databaseURL: 'https://thoth-a5c7a-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'thoth-a5c7a.firebasestorage.app',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyB1w8_bAzicmn7GZ7otTyJ492_tviGgtfA',
+    appId: '1:639767112265:windows:9235ac953e54c7acad2d98',
+    messagingSenderId: '639767112265',
+    projectId: 'thoth-a5c7a',
+    authDomain: 'thoth-a5c7a.firebaseapp.com',
+    databaseURL: 'https://thoth-a5c7a-default-rtdb.europe-west1.firebasedatabase.app',
+    storageBucket: 'thoth-a5c7a.firebasestorage.app',
+    measurementId: 'G-TBL4D1S4ZS',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyB1w8_bAzicmn7GZ7otTyJ492_tviGgtfA',
+    appId: '1:639767112265:macos:9235ac953e54c7acad2d98',
+    messagingSenderId: '639767112265',
+    projectId: 'thoth-a5c7a',
+    authDomain: 'thoth-a5c7a.firebaseapp.com',
+    databaseURL: 'https://thoth-a5c7a-default-rtdb.europe-west1.firebasedatabase.app',
+    storageBucket: 'thoth-a5c7a.firebasestorage.app',
+    measurementId: 'G-TBL4D1S4ZS',
   );
 }
