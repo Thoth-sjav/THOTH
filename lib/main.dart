@@ -799,6 +799,15 @@ class _PomodoroAppState extends State<PomodoroApp>
 
     await batch.commit();
 
+    // Índice global de usernames — permite pesquisa rápida e unicidade
+    if (perfil.nomedeutilizador.isNotEmpty) {
+      await _db.collection('usernames').doc(perfil.nomedeutilizador.toLowerCase()).set({
+        'uid': _uid,
+        'nome': perfil.nome,
+        'nomedeutilizador': perfil.nomedeutilizador,
+      });
+    }
+
     // Sessões — só adiciona novas (não apaga)
     // Guardamos separado para não exceder limite do batch (500 ops)
   }
@@ -2812,9 +2821,49 @@ class _TelaPerfilState extends State<TelaPerfil> {
     return 'data:image/jpeg;base64,${base64Encode(bytes)}';
   }
 
+  // Valida que o username só contém letras, números, pontos e underscores
+  bool _usernameValido(String u) =>
+      u.isEmpty || RegExp(r'^[a-zA-Z0-9._]{3,20}$').hasMatch(u);
+
+  Future<bool> _usernameDisponivel(String username) async {
+    if (username.isEmpty) return true;
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final doc = await FirebaseFirestore.instance
+        .collection('usernames')
+        .doc(username.toLowerCase())
+        .get();
+    if (!doc.exists) return true;
+    // É o próprio utilizador
+    return (doc.data()?['uid'] as String?) == uid;
+  }
+
   Future<void> _guardar() async {
+    final novoUsername = _usernameCtrl.text.trim();
+
+    if (!_usernameValido(novoUsername)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Username inválido. Usa entre 3-20 caracteres: letras, números, . e _'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+      return;
+    }
+
     setState(() => _aCarregarFoto = true);
     try {
+      // Verificar unicidade do username
+      final disponivel = await _usernameDisponivel(novoUsername);
+      if (!disponivel) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('@$novoUsername já está em uso. Escolhe outro.'),
+            backgroundColor: Colors.redAccent,
+          ));
+        }
+        return;
+      }
+
       String fotoFinal = _fotoUrl;
       if (_fotoLocal != null) {
         fotoFinal = await _uploadFoto(_fotoLocal!);
@@ -2824,7 +2873,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
           context,
           PerfilUsuario(
             nome: _nomeCtrl.text.trim(),
-            nomedeutilizador: _usernameCtrl.text.trim(),
+            nomedeutilizador: novoUsername,
             descricao: _descCtrl.text.trim(),
             motivos: _motivosCtrl.text.trim(),
             citacao: widget.perfil.citacao, // preservar citação existente
@@ -2906,7 +2955,8 @@ class _TelaPerfilState extends State<TelaPerfil> {
             const SizedBox(height: 22),
 
             _campo('Nome', _nomeCtrl, 'Insira o seu nome...'),
-            _campo('Nome de Utilizador', _usernameCtrl, 'Ex: Mestre do Foco'),
+            _campo('Username (@)', _usernameCtrl, 'ex: mestre_foco  (3-20 caracteres)',
+                hint2: 'Letras, números, . e _ · Deve ser único'),
             _campo('Descrição', _descCtrl, 'Escreva algo sobre si...', maxLines: 3),
             _campo(
               'Motivações para usar o Thoth',
@@ -2915,6 +2965,30 @@ class _TelaPerfilState extends State<TelaPerfil> {
               maxLines: 3,
             ),
             const SizedBox(height: 20),
+
+            // ── Partilhar perfil ──────────────────────────────────
+            if (widget.perfil.nomedeutilizador.isNotEmpty) ...[
+              OutlinedButton.icon(
+                onPressed: () {
+                  final username = widget.perfil.nomedeutilizador;
+                  final link = 'https://thoth.app/perfil/@$username';
+                  Share.share(
+                    '✨ Segue o meu perfil no Thoth!\n$link\n\n'
+                    'Pesquisa por @$username para me adicionares como amigo.',
+                    subject: 'O meu perfil Thoth — @$username',
+                  );
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: azul,
+                  side: const BorderSide(color: azul),
+                  minimumSize: const Size(double.infinity, 48),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.ios_share_rounded, size: 18),
+                label: Text('Partilhar perfil  @${widget.perfil.nomedeutilizador}'),
+              ),
+              const SizedBox(height: 12),
+            ],
 
             ElevatedButton(
               onPressed: _aCarregarFoto ? null : _guardar,
@@ -2934,17 +3008,21 @@ class _TelaPerfilState extends State<TelaPerfil> {
   }
 
   Widget _campo(String label, TextEditingController ctrl, String hint,
-      {int maxLines = 1}) {
+      {int maxLines = 1, String? hint2}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: TextField(
         controller: ctrl,
         maxLines: maxLines,
         style: TextStyle(color: _tc()),
-        textCapitalization: TextCapitalization.sentences,
+        textCapitalization: maxLines == 1 && hint2 == null
+            ? TextCapitalization.sentences
+            : TextCapitalization.none,
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
+          helperText: hint2,
+          helperStyle: TextStyle(color: _tc().withOpacity(0.4), fontSize: 11),
           hintStyle: TextStyle(color: _tc().withOpacity(0.3)),
           labelStyle: const TextStyle(color: azul),
           enabledBorder: const UnderlineInputBorder(
@@ -4649,29 +4727,47 @@ class _TelaAmigosState extends State<TelaAmigos> {
     if (query.trim().isEmpty) { setState(() => _resultados = []); return; }
     setState(() => _searching = true);
     try {
-      final snap = await _db
-          .collection('users')
-          .get();
+      final q = query.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
       final results = <Map<String, dynamic>>[];
-      for (final doc in snap.docs) {
-        if (doc.id == widget.uid) continue;
-        final perfilSnap = await _db
-            .collection('users')
-            .doc(doc.id)
-            .collection('perfil')
-            .doc('dados')
-            .get();
-        if (!perfilSnap.exists) continue;
-        final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
-        final q = query.toLowerCase();
-        if (perfil.nome.toLowerCase().contains(q) ||
-            perfil.nomedeutilizador.toLowerCase().contains(q)) {
-          // Check if already friends
-          final jaAmigo = _amigos.any((a) => a['uid'] == doc.id);
-          final jaPedido = _pedidos.any((p) => p['uid'] == doc.id);
-          results.add({'uid': doc.id, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
+
+      // 1. Pesquisa directa por @username no índice global (rápida e eficiente)
+      final usernameDoc = await _db.collection('usernames').doc(q).get();
+      if (usernameDoc.exists) {
+        final uid = usernameDoc.data()!['uid'] as String? ?? '';
+        if (uid.isNotEmpty && uid != widget.uid) {
+          final perfilSnap = await _db
+              .collection('users').doc(uid).collection('perfil').doc('dados').get();
+          if (perfilSnap.exists) {
+            final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+            final jaAmigo = _amigos.any((a) => a['uid'] == uid);
+            final jaPedido = _pedidos.any((p) => p['uid'] == uid);
+            results.add({'uid': uid, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
+          }
         }
       }
+
+      // 2. Pesquisa por nome (se query não começa com @) — varre o índice de usernames
+      if (!query.trim().startsWith('@') && q.length >= 2) {
+        final snap = await _db
+            .collection('usernames')
+            .orderBy('nome')
+            .startAt([q]).endAt(['$q\uf8ff'])
+            .limit(10)
+            .get();
+        for (final doc in snap.docs) {
+          final uid = doc.data()['uid'] as String? ?? '';
+          if (uid.isEmpty || uid == widget.uid) continue;
+          if (results.any((r) => r['uid'] == uid)) continue;
+          final perfilSnap = await _db
+              .collection('users').doc(uid).collection('perfil').doc('dados').get();
+          if (!perfilSnap.exists) continue;
+          final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+          final jaAmigo = _amigos.any((a) => a['uid'] == uid);
+          final jaPedido = _pedidos.any((p) => p['uid'] == uid);
+          results.add({'uid': uid, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
+        }
+      }
+
       if (mounted) setState(() { _resultados = results; _searching = false; });
     } catch (_) {
       if (mounted) setState(() => _searching = false);
@@ -4757,7 +4853,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
                       controller: _searchCtrl,
                       style: TextStyle(color: _tc()),
                       decoration: InputDecoration(
-                        hintText: 'Pesquisar por nome ou utilizador...',
+                        hintText: 'Pesquisar por @username ou nome...',
                         hintStyle: TextStyle(color: _tc38()),
                         prefixIcon: Icon(Icons.search, color: _tc54()),
                         suffixIcon: _searching
@@ -4780,6 +4876,48 @@ class _TelaAmigosState extends State<TelaAmigos> {
                         () { if (_searchCtrl.text == v) _pesquisar(v); },
                       ),
                     ),
+
+                    // ── Partilhar o meu perfil ─────────────────────
+                    FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('users').doc(widget.uid)
+                          .collection('perfil').doc('dados').get(),
+                      builder: (ctx, snap) {
+                        if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+                        final perfil = PerfilUsuario.fromJson(snap.data!.data() as Map<String, dynamic>);
+                        if (perfil.nomedeutilizador.isEmpty) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 10, bottom: 4),
+                            child: Text(
+                              '💡 Define um @username no teu perfil para partilhares o teu link.',
+                              style: TextStyle(color: _tc38(), fontSize: 12),
+                            ),
+                          );
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: OutlinedButton.icon(
+                            onPressed: () {
+                              final link = 'https://thoth.app/perfil/@${perfil.nomedeutilizador}';
+                              Share.share(
+                                '✨ Adiciona-me no Thoth!\n$link\n\n'
+                                'Ou pesquisa por @${perfil.nomedeutilizador} na aba de Amigos.',
+                                subject: 'O meu perfil no Thoth',
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: azul,
+                              side: const BorderSide(color: azul),
+                              minimumSize: const Size(double.infinity, 44),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            icon: const Icon(Icons.ios_share_rounded, size: 16),
+                            label: Text('Partilhar o meu perfil  @${perfil.nomedeutilizador}'),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
 
                     if (_resultados.isNotEmpty) ...[
                       const SizedBox(height: 12),
