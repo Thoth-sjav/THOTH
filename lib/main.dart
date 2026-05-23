@@ -9,6 +9,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -124,6 +126,7 @@ class PerfilUsuario {
   String descricao;
   String motivos;
   String citacao;
+  String fotoUrl; // URL da foto de perfil (guardada no Firestore Storage ou Google photo)
 
   PerfilUsuario({
     this.nome = '',
@@ -131,6 +134,7 @@ class PerfilUsuario {
     this.descricao = '',
     this.motivos = '',
     this.citacao = '',
+    this.fotoUrl = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -139,6 +143,7 @@ class PerfilUsuario {
         'descricao': descricao,
         'motivos': motivos,
         'citacao': citacao,
+        'fotoUrl': fotoUrl,
       };
 
   factory PerfilUsuario.fromJson(Map<String, dynamic> j) => PerfilUsuario(
@@ -147,6 +152,7 @@ class PerfilUsuario {
         descricao: j['descricao'] as String? ?? '',
         motivos: j['motivos'] as String? ?? '',
         citacao: j['citacao'] as String? ?? '',
+        fotoUrl: j['fotoUrl'] as String? ?? '',
       );
 }
 
@@ -837,7 +843,14 @@ class _MenuLateral extends StatelessWidget {
                   CircleAvatar(
                     radius: 35,
                     backgroundColor: Colors.black,
-                    child: Icon(Icons.person, size: 40, color: branco),
+                    backgroundImage: perfil.fotoUrl.isNotEmpty
+                        ? (perfil.fotoUrl.startsWith('data:')
+                            ? MemoryImage(base64Decode(perfil.fotoUrl.split(',').last))
+                            : NetworkImage(perfil.fotoUrl)) as ImageProvider
+                        : null,
+                    child: perfil.fotoUrl.isEmpty
+                        ? Icon(Icons.person, size: 40, color: branco)
+                        : null,
                   ),
                   const SizedBox(height: 10),
                   Text(
@@ -2183,16 +2196,20 @@ class _TelaPerfilState extends State<TelaPerfil> {
   late final TextEditingController _usernameCtrl;
   late final TextEditingController _descCtrl;
   late final TextEditingController _motivosCtrl;
+  File? _fotoLocal;        // foto nova escolhida localmente
+  String _fotoUrl = '';    // URL existente guardada no Firestore
+  bool _aCarregarFoto = false;
 
   static const Color azul = Color(0xFF1D81C7);
 
   @override
   void initState() {
     super.initState();
-    _nomeCtrl = TextEditingController(text: widget.perfil.nome);
+    _nomeCtrl     = TextEditingController(text: widget.perfil.nome);
     _usernameCtrl = TextEditingController(text: widget.perfil.nomedeutilizador);
-    _descCtrl = TextEditingController(text: widget.perfil.descricao);
-    _motivosCtrl = TextEditingController(text: widget.perfil.motivos);
+    _descCtrl     = TextEditingController(text: widget.perfil.descricao);
+    _motivosCtrl  = TextEditingController(text: widget.perfil.motivos);
+    _fotoUrl      = widget.perfil.fotoUrl;
   }
 
   @override
@@ -2204,54 +2221,152 @@ class _TelaPerfilState extends State<TelaPerfil> {
     super.dispose();
   }
 
+  Future<void> _escolherFoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: azul),
+              title: const Text('Tirar foto', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: azul),
+              title: const Text('Escolher da galeria', style: TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            if (_fotoLocal != null || _fotoUrl.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('Remover foto', style: TextStyle(color: Colors.redAccent)),
+                onTap: () => Navigator.pop(ctx, null),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (source == null && (_fotoLocal != null || _fotoUrl.isNotEmpty)) {
+      // Remover foto
+      setState(() { _fotoLocal = null; _fotoUrl = ''; });
+      return;
+    }
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 75, maxWidth: 512);
+    if (picked == null || !mounted) return;
+    setState(() => _fotoLocal = File(picked.path));
+  }
+
+  Future<String> _uploadFoto(File foto) async {
+    // Codificar em base64 e guardar no Firestore (evita Firebase Storage no plano Spark)
+    final bytes = await foto.readAsBytes();
+    return 'data:image/jpeg;base64,${base64Encode(bytes)}';
+  }
+
+  Future<void> _guardar() async {
+    setState(() => _aCarregarFoto = true);
+    try {
+      String fotoFinal = _fotoUrl;
+      if (_fotoLocal != null) {
+        fotoFinal = await _uploadFoto(_fotoLocal!);
+      }
+      if (mounted) {
+        Navigator.pop(
+          context,
+          PerfilUsuario(
+            nome: _nomeCtrl.text.trim(),
+            nomedeutilizador: _usernameCtrl.text.trim(),
+            descricao: _descCtrl.text.trim(),
+            motivos: _motivosCtrl.text.trim(),
+            fotoUrl: fotoFinal,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _aCarregarFoto = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Editar Perfil'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.check, color: azul),
-            tooltip: 'Guardar',
-            onPressed: _guardar,
-          ),
+          _aCarregarFoto
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(width: 20, height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: azul)),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.check, color: azul),
+                  tooltip: 'Guardar',
+                  onPressed: _guardar,
+                ),
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(25),
         child: Column(
           children: [
-            // Avatar
+            // Avatar com foto alterável
             Center(
-              child: Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 60,
-                    backgroundColor: azul,
-                    child: Text(
-                      _nomeCtrl.text.isNotEmpty
-                          ? _nomeCtrl.text[0].toUpperCase()
-                          : 'T',
-                      style: TextStyle(
-                        fontSize: 50,
-                        color: _tc(),
-                        fontWeight: FontWeight.bold,
+              child: GestureDetector(
+                onTap: _escolherFoto,
+                child: Stack(
+                  children: [
+                    CircleAvatar(
+                      radius: 60,
+                      backgroundColor: azul,
+                      backgroundImage: _fotoLocal != null
+                          ? FileImage(_fotoLocal!) as ImageProvider
+                          : (_fotoUrl.isNotEmpty && _fotoUrl.startsWith('data:'))
+                              ? MemoryImage(base64Decode(_fotoUrl.split(',').last))
+                              : (_fotoUrl.isNotEmpty ? NetworkImage(_fotoUrl) : null),
+                      child: (_fotoLocal == null && _fotoUrl.isEmpty)
+                          ? Text(
+                              _nomeCtrl.text.isNotEmpty
+                                  ? _nomeCtrl.text[0].toUpperCase()
+                                  : 'T',
+                              style: TextStyle(
+                                fontSize: 50,
+                                color: _tc(),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                          : null,
+                    ),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: CircleAvatar(
+                        radius: 18,
+                        backgroundColor: Colors.white,
+                        child: Icon(Icons.camera_alt, size: 18, color: azul),
                       ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.white,
-                      child: Icon(Icons.camera_alt, size: 18, color: azul),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 8),
+            Text('Toca para alterar a foto',
+              style: TextStyle(color: _tc().withOpacity(0.4), fontSize: 12)),
+            const SizedBox(height: 22),
 
             _campo('Nome', _nomeCtrl, 'Insira o seu nome...'),
             _campo('Nome de Utilizador', _usernameCtrl, 'Ex: Mestre do Foco'),
@@ -2265,34 +2380,18 @@ class _TelaPerfilState extends State<TelaPerfil> {
             const SizedBox(height: 20),
 
             ElevatedButton(
-              onPressed: _guardar,
+              onPressed: _aCarregarFoto ? null : _guardar,
               style: ElevatedButton.styleFrom(
                 backgroundColor: azul,
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text(
-                'GUARDAR PERFIL',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              child: const Text('GUARDAR PERFIL',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _guardar() {
-    Navigator.pop(
-      context,
-      PerfilUsuario(
-        nome: _nomeCtrl.text.trim(),
-        nomedeutilizador: _usernameCtrl.text.trim(),
-        descricao: _descCtrl.text.trim(),
-        motivos: _motivosCtrl.text.trim(),
       ),
     );
   }
@@ -3348,12 +3447,18 @@ class TelaDefinicoes extends StatefulWidget {
 }
 
 class _TelaDefinicoesState extends State<TelaDefinicoes> {
-  String _account  = 'ABCD_1234';
-  String _email    = 'abcd1234@gmail.com';
   bool   _notifs   = true;
   bool   _privado  = false;
 
   static const azul = Color(0xFF1D81C7);
+
+  // Dados reais da conta Google
+  String get _account {
+    // Nome de utilizador do perfil Thoth, ou displayName do Google, ou 'Utilizador'
+    final user = FirebaseAuth.instance.currentUser;
+    return user?.displayName ?? 'Utilizador';
+  }
+  String get _email => FirebaseAuth.instance.currentUser?.email ?? '';
 
   // Generic editable text dialog
   Future<String?> _editText(String titulo, String atual, {bool email = false}) {
@@ -3526,19 +3631,13 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
               Text('CONTA', style: const TextStyle(color: azul, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
               const SizedBox(height: 10),
 
-              // Account
+              // Account — apenas leitura (nome do Google)
               _tile(Icons.account_circle_outlined, 'Account', _account, fg, fgMuted, tileBg, border,
-                onTap: () async {
-                  final v = await _editText('Account', _account);
-                  if (v != null && v.isNotEmpty) setState(() => _account = v);
-                }),
+                onTap: () {}, readOnly: true),
 
-              // Email
+              // Email — apenas leitura (email do Google)
               _tile(Icons.mail_outline, 'Email', _email, fg, fgMuted, tileBg, border,
-                onTap: () async {
-                  final v = await _editText('Email', _email, email: true);
-                  if (v != null && v.isNotEmpty) setState(() => _email = v);
-                }),
+                onTap: () {}, readOnly: true),
 
               // Notificações (toggle)
               _tileToggle(Icons.notifications_outlined, 'Notificações', _notifs, fg, fgMuted, tileBg, border,
@@ -3568,9 +3667,9 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
 
   Widget _tile(IconData icon, String titulo, String? valor,
       Color fg, Color fgMuted, Color bg, Color border,
-      {required VoidCallback onTap, bool bold = false}) {
+      {required VoidCallback onTap, bool bold = false, bool readOnly = false}) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: readOnly ? null : onTap,
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -3583,8 +3682,15 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
             style: TextStyle(color: fg, fontSize: 15,
               fontWeight: bold ? FontWeight.bold : FontWeight.normal))),
           if (valor != null)
-            Text(valor, style: TextStyle(color: fgMuted, fontSize: 13))
-          else if (!bold)
+            Flexible(
+              child: Text(valor,
+                style: TextStyle(color: fgMuted, fontSize: 13),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                textAlign: TextAlign.end,
+              ),
+            )
+          else if (!bold && !readOnly)
             Icon(Icons.chevron_right, color: fgMuted, size: 20),
         ]),
       ),
