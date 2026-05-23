@@ -30,6 +30,15 @@ dependencies:
   # Diretório temporário para guardar imagem antes de partilhar
   path_provider: ^2.1.5
 
+  # Som ao terminar timer
+  audioplayers: ^6.1.0
+
+  # Notificações locais (tipo Duolingo)
+  flutter_local_notifications: ^18.0.1
+
+  # Timezone para agendar notificações
+  timezone: ^0.9.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -38,3 +47,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/sounds/
