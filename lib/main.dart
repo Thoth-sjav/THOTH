@@ -548,6 +548,82 @@ class _PomodoroAppState extends State<PomodoroApp>
   DateTime? _countdownAlvoGuardado;
   String? _countdownMotivoGuardado;
 
+  // Timer em segundo plano — guardamos o momento absoluto em que o timer
+  // estava a correr para recalcular ao regressar, mesmo que o processo tenha
+  // sido suspenso pelo SO.
+  DateTime? _timerReferencia;   // momento em que segundosRestantes foi registado
+  int?      _segundosNaReferencia; // valor de segundosRestantes nesse momento
+
+  /// Persiste o estado do timer em curso no Firestore para sobreviver
+  /// a mudanças de telefone ou fecho da app.
+  Future<void> _guardarEstadoTimer() async {
+    if (tarefaAtual == null) return;
+    await _configDoc.set({
+      'timerAtivo': estadoApp == EstadoApp.cronometro,
+      'timerTarefaId': tarefaAtual?.id,
+      'timerSegundosRestantes': segundosRestantes,
+      'timerCicloAtual': cicloAtual,
+      'timerEstaNoDescanso': estaNoDescanso,
+      'timerPausado': pausado,
+      'timerReferencia': (!pausado && estadoApp == EstadoApp.cronometro)
+          ? DateTime.now().toIso8601String()
+          : null,
+    }, SetOptions(merge: true));
+  }
+
+  /// Ao arrancar, restaura o timer que estava a correr (mesmo noutro telefone).
+  Future<void> _restaurarTimerSeAtivo(Map<String, dynamic> d) async {
+    final timerAtivo = d['timerAtivo'] as bool? ?? false;
+    if (!timerAtivo) return;
+
+    final tarefaId = d['timerTarefaId'] as String?;
+    if (tarefaId == null) return;
+
+    Tarefa? t;
+    try { t = tarefas.firstWhere((x) => x.id == tarefaId); } catch (_) { return; }
+
+    var segundos = (d['timerSegundosRestantes'] as int?) ?? t.estudo;
+    final ciclo  = (d['timerCicloAtual'] as int?) ?? 1;
+    final noDesc = (d['timerEstaNoDescanso'] as bool?) ?? false;
+    final estava = (d['timerPausado'] as bool?) ?? true;
+    final refStr = d['timerReferencia'] as String?;
+
+    // Se o timer estava a correr, calcular o tempo passado desde a referência
+    if (!estava && refStr != null) {
+      final ref = DateTime.tryParse(refStr);
+      if (ref != null) {
+        final elapsed = DateTime.now().difference(ref).inSeconds;
+        segundos = (segundos - elapsed).clamp(0, 999999);
+      }
+    }
+
+    // Restaurar estado
+    setState(() {
+      tarefaAtual = t;
+      ultimaTarefa = t;
+      cicloAtual = ciclo;
+      estaNoDescanso = noDesc;
+      segundosRestantes = segundos;
+      pausado = estava;
+      estadoApp = EstadoApp.cronometro;
+      _primeiraVez = estava;
+    });
+
+    // Relançar o ticker
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (pausado || tarefaAtual == null) return;
+      if (segundosRestantes > 1) {
+        setState(() { segundosRestantes--; _salvarEstadoAtual(); });
+        // Guardar referência periódica (a cada 30s) para sobreviver a suspensões
+        if (segundosRestantes % 30 == 0) _guardarEstadoTimer();
+      } else {
+        _salvarEstadoAtual();
+        _avancarFase();
+      }
+    });
+  }
+
   Future<void> _carregarDados() async {
     // Config (tema + countdown)
     final configSnap = await _configDoc.get();
@@ -598,7 +674,13 @@ class _PomodoroAppState extends State<PomodoroApp>
       _todoBlocosGuardados = jsonEncode(m);
     }
 
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      // Restaurar timer que estava a correr (mesmo noutro dispositivo)
+      if (configSnap.exists) {
+        await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
+      }
+    }
   }
 
   Future<void> _guardarTudo() async {
@@ -651,31 +733,41 @@ class _PomodoroAppState extends State<PomodoroApp>
     super.dispose();
   }
 
-  /// Pausa automática quando a app vai para background
+  /// Quando a app vai para background: guarda timestamp absoluto no Firestore.
+  /// Quando regressa: calcula os segundos passados e avança o timer.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
       _salvarEstadoAtual();
       _guardarTudo();
-      // Cronómetro continua a correr internamente — apenas pausa o ecrã
-    }
-    if (state == AppLifecycleState.resumed) {
-      // Recalcular segundos perdidos enquanto o ecrã estava desligado
-      if (estadoApp == EstadoApp.cronometro && !pausado && _backgroundTimestamp != null) {
-        final elapsed = DateTime.now().difference(_backgroundTimestamp!).inSeconds;
-        _backgroundTimestamp = null;
-        setState(() {
-          segundosRestantes = (segundosRestantes - elapsed).clamp(0, 999999);
-        });
-        if (segundosRestantes <= 0) _avancarFase();
+      if (estadoApp == EstadoApp.cronometro && !pausado) {
+        // Guardar referência absoluta para continuar ao regressar
+        _guardarEstadoTimer();
       }
     }
-    if (state == AppLifecycleState.inactive && estadoApp == EstadoApp.cronometro && !pausado) {
-      _backgroundTimestamp = DateTime.now();
+
+    if (state == AppLifecycleState.resumed) {
+      if (estadoApp == EstadoApp.cronometro && !pausado) {
+        // Recalcular a partir da referência guardada no Firestore
+        _configDoc.get().then((snap) {
+          if (!snap.exists || !mounted) return;
+          final d = snap.data() as Map<String, dynamic>;
+          final refStr = d['timerReferencia'] as String?;
+          final refSegundos = d['timerSegundosRestantes'] as int?;
+          if (refStr != null && refSegundos != null) {
+            final ref = DateTime.tryParse(refStr);
+            if (ref != null) {
+              final elapsed = DateTime.now().difference(ref).inSeconds;
+              final novosSegundos = (refSegundos - elapsed).clamp(0, 999999);
+              setState(() => segundosRestantes = novosSegundos);
+              if (novosSegundos <= 0) _avancarFase();
+            }
+          }
+        });
+      }
     }
   }
-
-  DateTime? _backgroundTimestamp;
 
   // ---------------------------------------------------------------------------
   // LÓGICA POMODORO
@@ -712,11 +804,15 @@ class _PomodoroAppState extends State<PomodoroApp>
           segundosRestantes--;
           _salvarEstadoAtual();
         });
+        // Guardar referência absoluta a cada 30s para sobreviver a suspensões
+        if (segundosRestantes % 30 == 0) _guardarEstadoTimer();
       } else {
         _salvarEstadoAtual();
         _avancarFase();
       }
     });
+    // Persistir imediatamente o estado do timer no Firestore
+    _guardarEstadoTimer();
   }
 
   void _salvarEstadoAtual() {
@@ -771,6 +867,7 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   void alternarPausa() {
     setState(() { pausado = !pausado; _primeiraVez = false; });
+    _guardarEstadoTimer();
   }
 
   void descartarProgresso() {
@@ -808,6 +905,11 @@ class _PomodoroAppState extends State<PomodoroApp>
     setState(() => estadoApp = EstadoApp.fim);
     _guardarTudo();
     if (sessoes.isNotEmpty) _guardarSessao(sessoes.last);
+    // Limpar estado do timer no Firestore
+    _configDoc.set({
+      'timerAtivo': false,
+      'timerReferencia': null,
+    }, SetOptions(merge: true));
   }
 
   void reset() {
@@ -823,6 +925,11 @@ class _PomodoroAppState extends State<PomodoroApp>
       tarefaAtual = null;
       pausado = false;
     });
+    // Limpar estado do timer no Firestore
+    _configDoc.set({
+      'timerAtivo': false,
+      'timerReferencia': null,
+    }, SetOptions(merge: true));
   }
 
   void removerTarefa(int index) {
