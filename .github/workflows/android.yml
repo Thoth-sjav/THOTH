@@ -36,7 +36,7 @@ jobs:
             echo "A usar keystore dos secrets..."
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
           else
-            echo "A criar keystore novo (primeira vez)..."
+            echo "A criar keystore novo..."
             keytool -genkeypair -v \
               -keystore ~/.android/debug.keystore \
               -alias androiddebugkey \
@@ -45,21 +45,19 @@ jobs:
               -storepass android \
               -keypass android \
               -dname "CN=Android Debug,O=Android,C=US"
-            echo ""
-            echo "========== COPIA ESTE BASE64 PARA O SECRET KEYSTORE_BASE64 =========="
+            echo "========== BASE64 DO KEYSTORE =========="
             base64 -w 0 ~/.android/debug.keystore
             echo ""
-            echo "====================================================================="
-            echo ""
-            echo "========== SHA-1 =========="
-            keytool -list -v \
-              -keystore ~/.android/debug.keystore \
-              -alias androiddebugkey \
-              -storepass android \
-              -keypass android \
-              | grep "SHA1:"
-            echo "==========================="
+            echo "========================================"
           fi
+          echo "========== SHA-1 DO KEYSTORE =========="
+          keytool -list -v \
+            -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android \
+            | grep "SHA1:"
+          echo "========================================"
 
       - name: Flutter Version
         run: flutter --version
@@ -72,6 +70,13 @@ jobs:
 
       - name: Build APK
         run: flutter build apk --release
+
+      - name: Print SHA-1 of compiled APK
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          echo "========== SHA-1 DO APK COMPILADO =========="
+          keytool -printcert -jarfile $APK | grep "SHA1:"
+          echo "============================================="
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
