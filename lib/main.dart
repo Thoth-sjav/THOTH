@@ -902,8 +902,8 @@ class _MenuLateral extends StatelessWidget {
                     backgroundColor: Colors.black,
                     backgroundImage: perfil.fotoUrl.isNotEmpty
                         ? (perfil.fotoUrl.startsWith('data:')
-                            ? MemoryImage(base64Decode(perfil.fotoUrl.split(',').last))
-                            : NetworkImage(perfil.fotoUrl)) as ImageProvider
+                            ? MemoryImage(base64Decode(perfil.fotoUrl.split(',').last)) as ImageProvider<Object>
+                            : NetworkImage(perfil.fotoUrl) as ImageProvider<Object>)
                         : null,
                     child: perfil.fotoUrl.isEmpty
                         ? Icon(Icons.person, size: 40, color: branco)
@@ -969,7 +969,7 @@ class _MenuLateral extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => TelaTodo(lista: state.notasTodo),
+                  builder: (_) => TelaTodo(lista: state.notasTodo, todoBlocosJson: state._todoBlocosGuardados),
                 ),
               );
             },
@@ -2579,10 +2579,10 @@ class _TelaPerfilState extends State<TelaPerfil> {
                       radius: 60,
                       backgroundColor: azul,
                       backgroundImage: _fotoLocal != null
-                          ? FileImage(_fotoLocal!) as ImageProvider
+                          ? FileImage(_fotoLocal!) as ImageProvider<Object>
                           : (_fotoUrl.isNotEmpty && _fotoUrl.startsWith('data:'))
-                              ? MemoryImage(base64Decode(_fotoUrl.split(',').last))
-                              : (_fotoUrl.isNotEmpty ? NetworkImage(_fotoUrl) : null),
+                              ? MemoryImage(base64Decode(_fotoUrl.split(',').last)) as ImageProvider<Object>
+                              : (_fotoUrl.isNotEmpty ? NetworkImage(_fotoUrl) as ImageProvider<Object> : null),
                       child: (_fotoLocal == null && _fotoUrl.isEmpty)
                           ? Text(
                               _nomeCtrl.text.isNotEmpty
@@ -2674,8 +2674,9 @@ class _TelaPerfilState extends State<TelaPerfil> {
 
 class TelaTodo extends StatefulWidget {
   final List<ItemTodo> lista;
+  final String? todoBlocosJson;
 
-  const TelaTodo({super.key, required this.lista});
+  const TelaTodo({super.key, required this.lista, this.todoBlocosJson});
 
   @override
   State<TelaTodo> createState() => _TelaTodoState();
