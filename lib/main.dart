@@ -126,7 +126,9 @@ Future<void> _agendarNotificacaoDiaria() async {
     ticker: 'Vai estudar.',
     playSound: true,
     enableVibration: true,
-    styleInformation: BigTextStyleInformation(''),
+    styleInformation: const BigTextStyleInformation(
+      'Thoth está à tua espera 📚 - Vai estudar e alcança os teus objetivos!',
+    ),
   );
   const iosDetails = DarwinNotificationDetails(
     presentAlert: true,
@@ -925,16 +927,31 @@ class _PomodoroAppState extends State<PomodoroApp>
         _todoBlocosGuardados = jsonEncode(m);
       }
 
+      // Restaurar timer que estava a correr (mesmo noutro dispositivo)
+      if (configSnap.exists) {
+        try {
+          await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
+        } catch (e) {
+          debugPrint('Erro ao restaurar timer: $e');
+        }
+      }
+      
+      // Agendar notificação diária
+      try {
+        await _agendarNotificacaoDiaria();
+      } catch (e) {
+        debugPrint('Erro ao agendar notificação diária: $e');
+      }
+      
+      // Migração: garantir que o username do utilizador está no índice global
+      try {
+        await _migrarUsernameParaIndice();
+      } catch (e) {
+        debugPrint('Erro ao migrar username para índice: $e');
+      }
+      
       if (mounted) {
         setState(() { _aCarregarDados = false; });
-        // Restaurar timer que estava a correr (mesmo noutro dispositivo)
-        if (configSnap.exists) {
-          await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
-        }
-        // Agendar notificação diária
-        _agendarNotificacaoDiaria();
-        // Migração: garantir que o username do utilizador está no índice global
-        _migrarUsernameParaIndice();
       }
     } catch (e) {
       debugPrint('Erro ao carregar dados do Firestore: $e');
