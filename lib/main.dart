@@ -876,6 +876,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _carregarDados() async {
+      debugPrint('PASSO 1 - entrou carregarDados');
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
