@@ -927,6 +927,7 @@ tarefas.sort(
     ((b.toJson()['ordem'] as int?) ?? 999999),
   ),
 );
+        debugPrint('PASSO 3 - tarefas carregadas');
 
 // Sessões
 final sessoesSnap = await _sessoesCol.get();
@@ -943,6 +944,7 @@ sessoes.sort(
     b.dataConclusao,
   ),
 );
+        debugPrint('PASSO 4 - sessoes carregadas');
 
       // Ultima tarefa
       final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
