@@ -1026,8 +1026,10 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   @override
+  @override
   void initState() {
     super.initState();
+    _audioPlayer = AudioPlayer();
     WidgetsBinding.instance.addObserver(this);
     _carregarDados();
     // Guardar quando o tema muda
@@ -1162,7 +1164,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   // ── Audio player para sons do timer ─────────────────────────────────────
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  late final AudioPlayer _audioPlayer;
 
   void _tocarSom({bool fim = false}) {
     Future.microtask(() async {
