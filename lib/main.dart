@@ -895,11 +895,38 @@ class _PomodoroAppState extends State<PomodoroApp>
         perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
       }
 
-      // Tarefas
-      final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
-      tarefas = tarefasSnap.docs
-          .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
-          .toList();
+     // Tarefas
+final tarefasSnap = await _tarefasCol.get();
+
+tarefas = tarefasSnap.docs
+    .map((d) => Tarefa.fromJson(
+          d.data() as Map<String, dynamic>,
+        ))
+    .toList();
+
+tarefas.sort(
+  (a, b) =>
+      ((a.toJson()['ordem'] as int?) ?? 999999)
+          .compareTo(
+    ((b.toJson()['ordem'] as int?) ?? 999999),
+  ),
+);
+
+// Sessões
+final sessoesSnap = await _sessoesCol.get();
+
+sessoes = sessoesSnap.docs
+    .map((d) => SessaoConcluida.fromJson(
+          d.data() as Map<String, dynamic>,
+        ))
+    .toList();
+
+sessoes.sort(
+  (a, b) =>
+      a.dataConclusao.compareTo(
+    b.dataConclusao,
+  ),
+);
 
       // Ultima tarefa
       final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
