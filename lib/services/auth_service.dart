@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -17,19 +17,17 @@ class AuthService {
       idToken: googleAuth.idToken,
     );
 
-    final userCredential =
-        await _auth.signInWithCredential(credential);
-
-    final user = userCredential.user;
+    final result = await _auth.signInWithCredential(credential);
+    final user = result.user;
 
     if (user != null) {
-      await _createUserIfNotExists(user);
+      await _ensureUser(user);
     }
 
     return user;
   }
 
-  Future<void> _createUserIfNotExists(User user) async {
+  Future<void> _ensureUser(User user) async {
     final ref = _db.collection('users').doc(user.uid);
 
     final doc = await ref.get();
@@ -38,25 +36,15 @@ class AuthService {
       await ref.set({
         'uid': user.uid,
         'email': user.email ?? '',
-        'nome': user.displayName ?? '',
+        'name': user.displayName ?? '',
         'photoURL': user.photoURL ?? '',
         'createdAt': FieldValue.serverTimestamp(),
         'settings': {
           'pomodoro': 25,
           'break': 5,
           'sound': true,
-        },
-        'stats': {
-          'xp': 0,
-          'level': 1,
         }
       });
-    } else {
-      await ref.set({
-        'email': user.email ?? '',
-        'nome': user.displayName ?? '',
-        'photoURL': user.photoURL ?? '',
-      }, SetOptions(merge: true));
     }
   }
 
