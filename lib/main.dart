@@ -936,12 +936,11 @@ class _PomodoroAppState extends State<PomodoroApp>
         // Migração: garantir que o username do utilizador está no índice global
         _migrarUsernameParaIndice();
       }
-    } catch (e, st) {
-      debugPrint('Erro ao carregar dados do Firestore: $e
-$st');
+    } catch (e) {
+      debugPrint('Erro ao carregar dados do Firestore: ' + e.toString());
       if (mounted) setState(() {
         _aCarregarDados = false;
-        _buildError = 'Erro ao carregar: $e';
+        _buildError = e.toString();
       });
     }
   }
@@ -1437,9 +1436,8 @@ $st');
         case EstadoApp.gerenciar:
           return _TelaGerenciar(state: this);
       }
-    } catch (e, st) {
-      debugPrint('ERRO NO BUILD: $e
-$st');
+    } catch (e) {
+      debugPrint('ERRO NO BUILD: ' + e.toString());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _buildError = e.toString());
       });
