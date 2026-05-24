@@ -356,25 +356,12 @@ class SessaoConcluida {
         'tempoFocoSegundos': tempoFocoSegundos,
       };
 
-factory SessaoConcluida.fromJson(
-    Map<String, dynamic> j) =>
-    SessaoConcluida(
-      tarefaNome:
-          j['tarefaNome'] as String? ?? '',
-      dataConclusao:
-          DateTime.tryParse(
-            j['dataConclusao']
-                    as String? ??
-                '',
-          ) ??
-          DateTime.now(),
-      ciclosConcluidos:
-          j['ciclosConcluidos'] as int? ??
-              0,
-      tempoFocoSegundos:
-          j['tempoFocoSegundos'] as int? ??
-              0,
-    );
+  factory SessaoConcluida.fromJson(Map<String, dynamic> j) => SessaoConcluida(
+        tarefaNome: j['tarefaNome'] as String? ?? '',
+        dataConclusao: DateTime.parse(j['dataConclusao'] as String),
+        ciclosConcluidos: j['ciclosConcluidos'] as int? ?? 0,
+        tempoFocoSegundos: j['tempoFocoSegundos'] as int? ?? 0,
+      );
 }
 
 // =============================================================================
@@ -876,12 +863,9 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _carregarDados() async {
-      debugPrint('PASSO 1 - entrou carregarDados');
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
-        debugPrint('PASSO 2 - config carregada');
-        
       if (configSnap.exists) {
         final d = configSnap.data() as Map<String, dynamic>;
         if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
@@ -911,40 +895,11 @@ class _PomodoroAppState extends State<PomodoroApp>
         perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
       }
 
-     // Tarefas
-final tarefasSnap = await _tarefasCol.get();
-
-tarefas = tarefasSnap.docs
-    .map((d) => Tarefa.fromJson(
-          d.data() as Map<String, dynamic>,
-        ))
-    .toList();
-
-tarefas.sort(
-  (a, b) =>
-      ((a.toJson()['ordem'] as int?) ?? 999999)
-          .compareTo(
-    ((b.toJson()['ordem'] as int?) ?? 999999),
-  ),
-);
-        debugPrint('PASSO 3 - tarefas carregadas');
-
-// Sessões
-final sessoesSnap = await _sessoesCol.get();
-
-sessoes = sessoesSnap.docs
-    .map((d) => SessaoConcluida.fromJson(
-          d.data() as Map<String, dynamic>,
-        ))
-    .toList();
-
-sessoes.sort(
-  (a, b) =>
-      a.dataConclusao.compareTo(
-    b.dataConclusao,
-  ),
-);
-        debugPrint('PASSO 4 - sessoes carregadas');
+      // Tarefas
+      final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
+      tarefas = tarefasSnap.docs
+          .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
+          .toList();
 
       // Ultima tarefa
       final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
@@ -952,6 +907,13 @@ sessoes.sort(
       if (ultimaId != null) {
         try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
       }
+
+      // Sessões
+      final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
+      sessoes = sessoesSnap.docs
+          .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
+          .toList();
+
       // Todo blocos — lidos em TelaTodo via Firestore diretamente
       // Guardamos snapshot JSON para passar ao widget
       final todoSnap = await _todoCol.get();
@@ -974,28 +936,11 @@ sessoes.sort(
         // Migração: garantir que o username do utilizador está no índice global
         _migrarUsernameParaIndice();
       }
-} catch (e, s) {
-  debugPrint('Erro Firestore: $e');
-  debugPrint('$s');
-
-  if (mounted) {
-    Future.microtask(() {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro: $e'),
-          duration: const Duration(seconds: 10),
-        ),
-      );
-    });
+    } catch (e) {
+      debugPrint('Erro ao carregar dados do Firestore: $e');
+      if (mounted) setState(() { _aCarregarDados = false; });
+    }
   }
-} finally {
-  if (mounted) {
-    setState(() {
-      _aCarregarDados = false;
-    });
-  }
-}
-}
 
   // Problema 1 — garante que utilizadores existentes ficam no índice global
   Future<void> _migrarUsernameParaIndice() async {
