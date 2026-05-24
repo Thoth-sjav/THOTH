@@ -1,7 +1,6 @@
 name: thoth_final_final
 description: Thoth Study Helper - Estude com inteligência, alcance seus objetivos
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -14,51 +13,42 @@ dependencies:
   # UI & Icons
   cupertino_icons: ^1.0.6
 
-  # Firebase - Funciona em todas as plataformas
+  # Firebase
   firebase_core: ^3.8.0
   firebase_auth: ^5.3.3
   cloud_firestore: ^5.4.4
 
-  # Autenticação Google - Suportado em Android, iOS, Web, Desktop
+  # Autenticação Google
   google_sign_in: ^6.2.1
 
-  # Seleção de Imagens - Funciona em todas as plataformas
-  # Mobile: abre câmara nativa
-  # Desktop: abre diálogo de ficheiro
+  # Seleção de Imagens
   image_picker: ^1.1.2
 
-  # Partilha - Funciona em todas as plataformas
+  # Partilha
   share_plus: ^10.1.4
 
-  # Gestão de diretórios - Funciona em todas as plataformas
+  # Gestão de diretórios
   path_provider: ^2.1.5
 
-  # Notificações locais - Suportadas em todas as plataformas
-  # Android: Notificações do sistema
-  # iOS: Notificações do sistema
-  # macOS: Notificações do sistema
-  # Windows: Notificações do Windows 10+
-  # Linux: Notificações D-Bus
+  # Notificações locais
   flutter_local_notifications: ^18.0.1
 
-  # Timezone para agendar notificações - Funciona em todas as plataformas
+  # Timezone para agendar notificações
   timezone: ^0.9.4
 
   # Som do timer
   audioplayers: ^6.1.0
 
-  # Opcional: Controlar janela (Windows, macOS, Linux)
+  # Controlar janela desktop
   window_manager: ^0.3.7
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
   flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
-
   assets:
     - assets/sounds/timer_fim.wav
     - assets/sounds/timer_fase.wav
