@@ -16,7 +16,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show File, Directory, Platform;
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -172,11 +171,6 @@ Future<void> main() async {
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
   await _inicializarNotificacoes();
@@ -765,13 +759,6 @@ class _PomodoroAppState extends State<PomodoroApp>
   // Loading state
   bool _aCarregarDados = true;
 
-  SharedPreferences? _prefs;
-
-  static const String _kPerfil = 'perfil_local';
-  static const String _kTarefas = 'tarefas_local';
-  static const String _kSessoes = 'sessoes_local';
-  static const String _kTimer = 'timer_local';
-
   // ---------------------------------------------------------------------------
   // CICLO DE VIDA
   // ---------------------------------------------------------------------------
@@ -875,112 +862,7 @@ class _PomodoroAppState extends State<PomodoroApp>
     });
   }
 
-  
-Future<void> _initPrefs() async {
-    _prefs = await SharedPreferences.getInstance();
-  }
-
-  Future<void> _guardarLocalmente() async {
-    if (_prefs == null) return;
-
-    try {
-      await _prefs!.setString(
-        _kPerfil,
-        jsonEncode(perfil.toJson()),
-      );
-
-      await _prefs!.setString(
-        _kTarefas,
-        jsonEncode(
-          tarefas.map((e) => e.toJson()).toList(),
-        ),
-      );
-
-      await _prefs!.setString(
-        _kSessoes,
-        jsonEncode(
-          sessoes.map((e) => e.toJson()).toList(),
-        ),
-      );
-
-      final timerData = {
-        'tarefaAtualId': tarefaAtual?.id,
-        'estadoApp': estadoApp.index,
-        'cicloAtual': cicloAtual,
-        'estaNoDescanso': estaNoDescanso,
-        'segundosRestantes': segundosRestantes,
-        'pausado': pausado,
-      };
-
-      await _prefs!.setString(
-        _kTimer,
-        jsonEncode(timerData),
-      );
-    } catch (e) {
-      debugPrint('Erro local save: $e');
-    }
-  }
-
-  Future<void> _restaurarLocalmente() async {
-    if (_prefs == null) return;
-
-    try {
-      final perfilStr = _prefs!.getString(_kPerfil);
-      if (perfilStr != null && perfilStr.isNotEmpty) {
-        perfil = PerfilUsuario.fromJson(
-          jsonDecode(perfilStr),
-        );
-      }
-
-      final tarefasStr = _prefs!.getString(_kTarefas);
-      if (tarefasStr != null && tarefasStr.isNotEmpty) {
-        final decoded = jsonDecode(tarefasStr) as List;
-
-        tarefas = decoded
-            .map((e) => Tarefa.fromJson(e))
-            .toList();
-      }
-
-      final sessoesStr = _prefs!.getString(_kSessoes);
-      if (sessoesStr != null && sessoesStr.isNotEmpty) {
-        final decoded = jsonDecode(sessoesStr) as List;
-
-        sessoes = decoded
-            .map((e) => SessaoConcluida.fromJson(e))
-            .toList();
-      }
-
-      final timerStr = _prefs!.getString(_kTimer);
-
-      if (timerStr != null && timerStr.isNotEmpty) {
-        final timer = jsonDecode(timerStr);
-
-        final tarefaId = timer['tarefaAtualId'];
-
-        if (tarefaId != null) {
-          try {
-            tarefaAtual = tarefas.firstWhere(
-              (t) => t.id == tarefaId,
-            );
-
-            estadoApp = EstadoApp.values[
-                timer['estadoApp'] ?? 0];
-
-            cicloAtual = timer['cicloAtual'] ?? 1;
-            estaNoDescanso = timer['estaNoDescanso'] ?? false;
-            segundosRestantes = timer['segundosRestantes'] ?? 0;
-            pausado = timer['pausado'] ?? true;
-
-            ultimaTarefa = tarefaAtual;
-          } catch (_) {}
-        }
-      }
-    } catch (e) {
-      debugPrint('Erro restore local: $e');
-    }
-  }
-
-Future<void> _carregarDados() async {
+  Future<void> _carregarDados() async {
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
@@ -1146,44 +1028,22 @@ Future<void> _carregarDados() async {
   @override
   void initState() {
     super.initState();
-
     WidgetsBinding.instance.addObserver(this);
-
-    (() async {
-      await _initPrefs();
-
-      await _restaurarLocalmente();
-
-      if (mounted) {
-        setState(() {
-          _aCarregarDados = false;
-        });
-      }
-
-      await _carregarDados();
-    })();
-
+    _carregarDados();
+    // Guardar quando o tema muda
     temaEscuro.addListener(() {
-      _configDoc.set(
-        {'temaEscuro': temaEscuro.value},
-        SetOptions(merge: true),
-      );
-
-      _guardarLocalmente();
+      _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-
     _salvarEstadoAtual();
-    _guardarLocalmente();
-
+    _guardarTarefasImediato();
+    _guardarTudo();
     _audioPlayer.dispose();
-
     WidgetsBinding.instance.removeObserver(this);
-
     super.dispose();
   }
 
@@ -1194,8 +1054,6 @@ Future<void> _carregarDados() async {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-
-      _guardarLocalmente();
       _salvarEstadoAtual();
       _guardarTudo();
       _guardarTarefasImediato();
