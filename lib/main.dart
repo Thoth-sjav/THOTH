@@ -673,12 +673,21 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
+  accessToken: googleAuth.accessToken,
+  idToken: googleAuth.idToken,
+);
 
-      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      
+final currentUser = FirebaseAuth.instance.currentUser;
+
+UserCredential userCredential;
+
+if (currentUser != null && currentUser.isAnonymous) {
+  userCredential =
+      await currentUser.linkWithCredential(credential);
+} else {
+  userCredential =
+      await FirebaseAuth.instance.signInWithCredential(credential);
+}
       // ✨ NOVO: Guardar a sessão após login bem-sucedido
       if (userCredential.user != null) {
         await SessionPersistenceService.saveSession(userCredential.user!.uid);
