@@ -1,75 +1,86 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'logger_service.dart';
+import 'models.dart';
 
 class AuthService {
+  static final _instance = AuthService._internal();
+
+  factory AuthService() => _instance;
+  AuthService._internal();
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn =
+      GoogleSignIn(scopes: ['email', 'profile']);
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// LOGIN COM GOOGLE (CORRIGIDO + SEM PERDA DE DADOS)
-  Future<UserCredential> signInWithGoogle() async {
-    final GoogleSignIn googleSignIn = GoogleSignIn();
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  User? get currentUser => _auth.currentUser;
 
-    final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+  /// LOGIN GOOGLE (CORRIGIDO)
+  Future<User?> signInWithGoogle() async {
+    try {
+      final googleUser = await _googleSignIn.signIn();
 
-    if (googleUser == null) {
-      throw Exception("Login cancelado pelo utilizador");
+      if (googleUser == null) return null;
+
+      final googleAuth = await googleUser.authentication;
+
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final currentUser = _auth.currentUser;
+
+      late UserCredential userCredential;
+
+      /// 🔥 FIX PRINCIPAL: evitar criar novo UID
+      if (currentUser != null && currentUser.isAnonymous) {
+        userCredential =
+            await currentUser.linkWithCredential(credential);
+      } else {
+        userCredential =
+            await _auth.signInWithCredential(credential);
+      }
+
+      final user = userCredential.user;
+
+      if (user != null) {
+        await _ensureUserDocument(user);
+      }
+
+      return user;
+    } catch (e) {
+      LoggerService().error('Erro login Google: $e', e);
+      rethrow;
     }
-
-    final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
-
-    final AuthCredential credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
-      idToken: googleAuth.idToken,
-    );
-
-    final User? currentUser = _auth.currentUser;
-
-    late UserCredential userCredential;
-
-    /// 🔥 IMPORTANTE: evita criação de novo UID
-    if (currentUser != null && currentUser.isAnonymous) {
-      userCredential =
-          await currentUser.linkWithCredential(credential);
-    } else {
-      userCredential =
-          await _auth.signInWithCredential(credential);
-    }
-
-    final user = userCredential.user;
-
-    if (user != null) {
-      await _createUserIfNotExists(user);
-    }
-
-    return userCredential;
   }
 
-  /// 🔥 CRIA PERFIL NO FIRESTORE (SE NÃO EXISTIR)
-  Future<void> _createUserIfNotExists(User user) async {
-    final docRef = _firestore.collection('users').doc(user.uid);
+  /// 🔥 GARANTE PERFIL NO FIRESTORE
+  Future<void> _ensureUserDocument(User user) async {
+    final ref =
+        _firestore.collection('utilizadores').doc(user.uid);
 
-    final doc = await docRef.get();
+    final doc = await ref.get();
 
     if (!doc.exists) {
-      await docRef.set({
+      await ref.set({
         'uid': user.uid,
         'email': user.email ?? '',
         'name': user.displayName ?? '',
         'photoURL': user.photoURL ?? '',
         'createdAt': FieldValue.serverTimestamp(),
-
-        // defaults da tua app
         'settings': {
-          'pomodoroTime': 25,
-          'breakTime': 5,
-          'soundEnabled': true,
+          'pomodoro': 25,
+          'break': 5,
+          'sound': true,
         }
       });
     } else {
-      // garante atualização mínima sem apagar dados
-      await docRef.set({
+      await ref.set({
         'email': user.email ?? '',
         'name': user.displayName ?? '',
         'photoURL': user.photoURL ?? '',
@@ -77,12 +88,8 @@ class AuthService {
     }
   }
 
-  /// LOGOUT
-  Future<void> signOut() async {
+  Future<void> logout() async {
     await _auth.signOut();
-    await GoogleSignIn().signOut();
+    await _googleSignIn.signOut();
   }
-
-  /// USER ATUAL
-  User? get currentUser => _auth.currentUser;
 }
