@@ -2869,25 +2869,6 @@ class _TelaCronometro extends StatelessWidget {
                     ),
 
                   // Task name ──────────────────────────────────────────────────
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-
-                  // DND indicator
-                  if (state._modoDNDAtivo)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4, bottom: 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.do_not_disturb_on, size: 13, color: Color(0xFF1D81C7)),
-                          const SizedBox(width: 4),
-                          Text('Modo não perturbar activo', style: TextStyle(color: _tc38(), fontSize: 11)),
-                        ],
-                      ),
-                    ),
-
                   // Task name
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 30),
@@ -2971,7 +2952,8 @@ class _TelaCronometro extends StatelessWidget {
         ),
       ),
     );
-    }); // end ValueListenableBuilder
+    },
+  );
   }
 
 }
