@@ -765,7 +765,7 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   // ── Firestore helpers ───────────────────────────────────────────────────────
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
   DocumentReference get _configDoc  => _db.collection('users').doc(_uid).collection('config').doc('dados');
   DocumentReference get _perfilDoc  => _db.collection('users').doc(_uid).collection('perfil').doc('dados');
   CollectionReference get _tarefasCol => _db.collection('users').doc(_uid).collection('tarefas');
@@ -863,6 +863,10 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _carregarDados() async {
+    if (_uid.isEmpty) {
+      if (mounted) setState(() { _aCarregarDados = false; });
+      return;
+    }
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
@@ -962,6 +966,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _guardarTudo() async {
+    if (_uid.isEmpty) return;
     final batch = _db.batch();
 
     // Config
@@ -1003,6 +1008,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _guardarSessao(SessaoConcluida s) async {
+    if (_uid.isEmpty) return;
     await _sessoesCol.add(s.toJson());
   }
 
@@ -1010,7 +1016,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   /// Mais leve que _guardarTudo() — só escreve as tarefas.
   /// Usado ao sair da app ou mudar de fase para garantir que nada se perde.
   Future<void> _guardarTarefasImediato() async {
-    if (tarefas.isEmpty) return;
+    if (_uid.isEmpty || tarefas.isEmpty) return;
     try {
       final batch = _db.batch();
       for (int i = 0; i < tarefas.length; i++) {
@@ -1152,7 +1158,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   void _salvarEstadoAtual() {
-    if (tarefaAtual == null) return;
+    if (tarefaAtual == null || _uid.isEmpty) return;
     tarefaAtual!
       ..cicloSalvo = cicloAtual
       ..estavaNoDescanso = estaNoDescanso
@@ -3639,7 +3645,7 @@ class _TelaTodoState extends State<TelaTodo> {
   }
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
   CollectionReference get _todoCol => _db.collection('users').doc(_uid).collection('todo');
 
   Future<void> _carregarBlocos() async {
@@ -4811,7 +4817,7 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
   static const azul = Color(0xFF1D81C7);
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
   DocumentReference get _configDoc =>
       _db.collection('users').doc(_uid).collection('config').doc('dados');
 
@@ -6814,7 +6820,7 @@ class _TelaLeaderboardState extends State<TelaLeaderboard> with SingleTickerProv
   static const azul = Color(0xFF1D81C7);
   late TabController _tabCtrl;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   List<Map<String, dynamic>> _rankingStreak = [];
   List<Map<String, dynamic>> _rankingTempo = [];
