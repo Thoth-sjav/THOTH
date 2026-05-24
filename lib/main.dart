@@ -758,6 +758,7 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   // Loading state
   bool _aCarregarDados = true;
+  String? _erroCarregamento;
 
   // ---------------------------------------------------------------------------
   // CICLO DE VIDA
@@ -942,7 +943,10 @@ class _PomodoroAppState extends State<PomodoroApp>
       }
     } catch (e) {
       debugPrint('Erro ao carregar dados do Firestore: $e');
-      if (mounted) setState(() { _aCarregarDados = false; });
+      if (mounted) setState(() {
+        _aCarregarDados = false;
+        _erroCarregamento = e.toString();
+      });
     }
   }
 
@@ -1391,24 +1395,51 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   Widget build(BuildContext context) {
     // Mostrar splash de carregamento enquanto os dados do Firestore chegam
-    if (_aCarregarDados) {
+    if (_aCarregarDados || _erroCarregamento != null) {
       return ValueListenableBuilder<bool>(
         valueListenable: temaEscuro,
         builder: (_, escuro, __) => Scaffold(
           backgroundColor: escuro ? Colors.black : Colors.white,
-          body: const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('T h o t h',
-                    style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1D81C7),
-                        letterSpacing: 6)),
-                SizedBox(height: 32),
-                CircularProgressIndicator(color: Color(0xFF1D81C7)),
-              ],
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('T h o t h',
+                      style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1D81C7),
+                          letterSpacing: 6)),
+                  const SizedBox(height: 32),
+                  if (_erroCarregamento == null)
+                    const CircularProgressIndicator(color: Color(0xFF1D81C7))
+                  else ...[
+                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+                    const SizedBox(height: 16),
+                    const Text('Erro ao carregar dados:',
+                        style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      _erroCarregamento!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _aCarregarDados = true;
+                          _erroCarregamento = null;
+                        });
+                        _carregarDados();
+                      },
+                      child: const Text('Tentar novamente'),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ),
