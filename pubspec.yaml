@@ -44,6 +44,9 @@ dependencies:
   # Timezone para agendar notificações - Funciona em todas as plataformas
   timezone: ^0.9.4
 
+  # Som do timer
+  audioplayers: ^6.1.0
+
   # Opcional: Controlar janela (Windows, macOS, Linux)
   window_manager: ^0.3.7
 
@@ -55,3 +58,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/sounds/timer_fim.wav
+    - assets/sounds/timer_fase.wav
