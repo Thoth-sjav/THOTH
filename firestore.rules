@@ -1,109 +1,168 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ────────────────────────────────────────────────────────────────────
-    // Índice global de usernames — permite procurar/validar usernames
-    //   • LEITURA: qualquer utilizador autenticado (para procurar amigos)
-    //   • ESCRITA: só o dono da entrada (uid no documento) pode escrever
-    // ────────────────────────────────────────────────────────────────────
-    match /usernames/{username} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null
-                    && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if request.auth != null
-                            && resource.data.uid == request.auth.uid;
+    
+    // Funções helper
+    function isAuthenticated() {
+      return request.auth != null;
     }
-
-    // ────────────────────────────────────────────────────────────────────
-    // Dados pessoais do utilizador (e subcoleções)
-    //   • Cada utilizador acede APENAS aos seus próprios dados
-    //   • Excepções específicas: perfil, pedidos_amizade e reacoes
-    //     têm regras especiais para suportar a funcionalidade de amigos
-    // ────────────────────────────────────────────────────────────────────
-    match /users/{userId} {
-      // Documento raiz do utilizador
-      allow read, write: if request.auth != null
-                         && request.auth.uid == userId;
-
-      // ── PERFIL ────────────────────────────────────────────────────────
-      // O dono lê/escreve sempre. Outros utilizadores autenticados podem
-      // LER o perfil (necessário para ver amigos e resultados de pesquisa).
-      match /perfil/{docId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null
-                     && request.auth.uid == userId;
+    
+    function isOwner(userUid) {
+      return isAuthenticated() && request.auth.uid == userUid;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && get(/databases/$(database)/documents/utilizadores/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // Rate limiting - máximo 100 writes por minuto
+    function rateLimitOk() {
+      let userRef = /databases/$(database)/documents/utilizadores/$(request.auth.uid);
+      let now = request.time.toMillis();
+      let lastRequest = get(userRef).data.get('lastWrite', 0);
+      let requestCount = get(userRef).data.get('requestCount', 0);
+      return (now - lastRequest) > 600 || requestCount < 100; // ~600ms entre requests
+    }
+    
+    // ─── UTILIZADORES ────────────────────────────────────────────────────────
+    match /utilizadores/{userUid} {
+      // Apenas o proprietário pode ler
+      allow read: if isOwner(userUid) || get(request.path + '?max=1').data.username != null;
+      
+      // Apenas o proprietário ou admin pode criar/atualizar
+      allow create: if isOwner(userUid) && validate_perfil(resource);
+      allow update: if isOwner(userUid) && validate_perfil(resource) && rateLimitOk();
+      
+      // Apenas admin pode apagar
+      allow delete: if isAdmin();
+      
+      // Subcoleção de amigos
+      match /amigos/{amigoUid} {
+        allow read: if isOwner(userUid);
+        allow write: if isOwner(userUid);
       }
-
-      // ── CONFIG (tema, countdown, timer ativo, freezes, meta) ──────────
-      match /config/{docId} {
-        allow read, write: if request.auth != null
-                           && request.auth.uid == userId;
-      }
-
-      // ── TAREFAS ───────────────────────────────────────────────────────
-      match /tarefas/{tarefaId} {
-        allow read, write: if request.auth != null
-                           && request.auth.uid == userId;
-      }
-
-      // ── SESSÕES CONCLUÍDAS ────────────────────────────────────────────
-      // O dono lê/escreve. Amigos podem LER para feed de actividade.
-      match /sessoes/{sessaoId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null
-                     && request.auth.uid == userId;
-      }
-
-      // ── TO-DO LIST (blocos) ───────────────────────────────────────────
-      match /todo/{blocoId} {
-        allow read, write: if request.auth != null
-                           && request.auth.uid == userId;
-      }
-
-      // ── AMIGOS ────────────────────────────────────────────────────────
-      // O dono gere a sua lista. Qualquer autenticado pode ESCREVER um
-      // novo documento (para confirmar amizade bidirecional).
-      match /amigos/{amigoId} {
-        allow read: if request.auth != null
-                    && request.auth.uid == userId;
-        allow write: if request.auth != null
-                     && (request.auth.uid == userId
-                         || request.auth.uid == amigoId);
-      }
-
-      // ── PEDIDOS DE AMIZADE ────────────────────────────────────────────
-      // O destinatário (userId) lê os pedidos recebidos.
-      // O remetente pode criar um pedido a outro user.
-      match /pedidos_amizade/{pedidoId} {
-        allow read: if request.auth != null
-                    && (request.auth.uid == userId
-                        || request.auth.uid == pedidoId);
-        allow create: if request.auth != null
-                      && request.auth.uid == pedidoId;
-        allow delete: if request.auth != null
-                      && (request.auth.uid == userId
-                          || request.auth.uid == pedidoId);
-        allow update: if request.auth != null
-                      && request.auth.uid == userId;
-      }
-
-      // ── PARTILHAS (resultados/conquistas partilhadas com amigos) ──────
-      // O dono lê/escreve. Amigos autenticados podem LER.
-      match /partilhas/{partilhaId} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null
-                     && request.auth.uid == userId;
-      }
-
-      // ── REACÇÕES (emojis em partilhas/sessões dos amigos) ─────────────
-      // Qualquer autenticado pode reagir (criar). Só pode apagar a sua.
-      match /reacoes/{reacaoId} {
-        allow read: if request.auth != null;
-        allow create: if request.auth != null;
-        allow delete: if request.auth != null
-                      && resource.data.deUid == request.auth.uid;
-      }
+    }
+    
+    // Função de validação de perfil
+    function validate_perfil(data) {
+      let required = ['email', 'dataCriacao'];
+      let allFieldsPresent = data.keys().hasAll(required);
+      
+      let emailValid = data.email is string && data.email.size() > 0 && data.email.size() < 255;
+      let usernameValid = !data.keys().hasAny(['username']) || 
+                          (data.username is string && 
+                           data.username.size() >= 3 && 
+                           data.username.size() <= 30 &&
+                           data.username.matches('^[a-zA-Z0-9_-]+$'));
+      let duracaoValid = !data.keys().hasAny(['duracaoPadrao']) || 
+                         (data.duracaoPadrao is int && data.duracaoPadrao > 0 && data.duracaoPadrao < 480);
+      
+      return allFieldsPresent && emailValid && usernameValid && duracaoValid;
+    }
+    
+    // ─── TAREFAS ─────────────────────────────────────────────────────────────
+    match /tarefas/{tarefaId} {
+      // Ler apenas tarefas do próprio utilizador
+      allow read: if isOwner(resource.data.userUid);
+      
+      // Criar apenas tarefas do próprio utilizador
+      allow create: if isAuthenticated() && 
+                       isOwner(request.resource.data.userUid) &&
+                       validate_tarefa(request.resource.data) &&
+                       rateLimitOk();
+      
+      // Atualizar apenas tarefas do próprio utilizador
+      allow update: if isOwner(resource.data.userUid) &&
+                       validate_tarefa(resource.data) &&
+                       rateLimitOk();
+      
+      // Apagar apenas tarefas do próprio utilizador
+      allow delete: if isOwner(resource.data.userUid);
+    }
+    
+    // Função de validação de tarefa
+    function validate_tarefa(data) {
+      let required = ['titulo', 'userUid', 'duracaoEstimada', 'dataCriacao', 'materia', 'status'];
+      let allFieldsPresent = data.keys().hasAll(required);
+      
+      let tituloValid = data.titulo is string && data.titulo.size() >= 3 && data.titulo.size() <= 200;
+      let duracaoValid = data.duracaoEstimada is int && data.duracaoEstimada > 0 && data.duracaoEstimada < 480;
+      let statusValid = data.status in ['pendente', 'em_progresso', 'concluida'];
+      let prioridadeValid = !data.keys().hasAny(['prioridade']) || 
+                            (data.prioridade is int && data.prioridade >= 1 && data.prioridade <= 5);
+      let materiaValid = data.materia is string && data.materia.size() >= 1 && data.materia.size() <= 50;
+      
+      return allFieldsPresent && tituloValid && duracaoValid && statusValid && prioridadeValid && materiaValid;
+    }
+    
+    // ─── TODO ITEMS ──────────────────────────────────────────────────────────
+    match /todo_items/{itemId} {
+      // Ler apenas itens do próprio utilizador
+      allow read: if isOwner(resource.data.userUid);
+      
+      // Criar apenas itens do próprio utilizador
+      allow create: if isAuthenticated() &&
+                       isOwner(request.resource.data.userUid) &&
+                       validate_todo_item(request.resource.data) &&
+                       rateLimitOk();
+      
+      // Atualizar apenas itens do próprio utilizador
+      allow update: if isOwner(resource.data.userUid) &&
+                       validate_todo_item(resource.data) &&
+                       rateLimitOk();
+      
+      // Apagar apenas itens do próprio utilizador
+      allow delete: if isOwner(resource.data.userUid);
+    }
+    
+    // Função de validação de TODO item
+    function validate_todo_item(data) {
+      let required = ['titulo', 'userUid', 'bloco', 'dataCriacao', 'indice'];
+      let allFieldsPresent = data.keys().hasAll(required);
+      
+      let tituloValid = data.titulo is string && data.titulo.size() >= 1 && data.titulo.size() <= 200;
+      let blocoValid = data.bloco in ['morning', 'afternoon', 'evening', 'night'];
+      let indiceValid = data.indice is int && data.indice >= 0;
+      let concluidoValid = !data.keys().hasAny(['concluido']) || data.concluido is bool;
+      
+      return allFieldsPresent && tituloValid && blocoValid && indiceValid && concluidoValid;
+    }
+    
+    // ─── SESSÕES ─────────────────────────────────────────────────────────────
+    match /sessoes_concluidas/{sessaoId} {
+      // Ler apenas sessões do próprio utilizador
+      allow read: if isOwner(resource.data.userUid);
+      
+      // Criar apenas sessões do próprio utilizador
+      allow create: if isAuthenticated() &&
+                       isOwner(request.resource.data.userUid) &&
+                       validate_sessao(request.resource.data) &&
+                       rateLimitOk();
+      
+      // Atualizar apenas sessões do próprio utilizador (para reações)
+      allow update: if isOwner(resource.data.userUid) && rateLimitOk();
+      
+      // Não permitir apagar sessões (histórico)
+      allow delete: if false;
+    }
+    
+    // Função de validação de sessão
+    function validate_sessao(data) {
+      let required = ['userUid', 'tarefaId', 'dataConclusao', 'duracaoTotal', 'ciclosCompletos'];
+      let allFieldsPresent = data.keys().hasAll(required);
+      
+      let duracao = data.duracaoTotal is int && data.duracaoTotal > 0 && data.duracaoTotal < 28800; // < 8 horas
+      let ciclos = data.ciclosCompletos is int && data.ciclosCompletos >= 0;
+      let ciclosPausa = !data.keys().hasAny(['ciclosPausa']) || 
+                        (data.ciclosPausa is int && data.ciclosPausa >= 0);
+      
+      return allFieldsPresent && duracao && ciclos && ciclosPausa;
+    }
+    
+    // ─── DEFAULT DENY ────────────────────────────────────────────────────────
+    // Nega acesso a qualquer outro documento
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
