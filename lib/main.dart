@@ -68,7 +68,6 @@ final List<String> _mensagensNotif = [
 Future<void> _inicializarNotificacoes() async {
   tz.initializeTimeZones();
 
-  // Windows/Linux não têm suporte nativo; macOS tem via DarwinInitializationSettings
   if (_isDesktop && !Platform.isMacOS) return;
 
   const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -85,6 +84,15 @@ Future<void> _inicializarNotificacoes() async {
   await _notifPlugin.initialize(
     const InitializationSettings(android: android, iOS: ios, macOS: macos),
   );
+
+  // Android 13+ — pedir permissão de notificações em runtime
+  if (!kIsWeb && Platform.isAndroid) {
+    final androidPlugin = _notifPlugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
+    await androidPlugin?.requestExactAlarmsPermission();
+  }
 }
 
 /// Agenda uma notificação diária às 20h, MAS só a mostra se o utilizador
@@ -1374,10 +1382,11 @@ class _MenuLateral extends StatelessWidget {
             stream: FirebaseFirestore.instance
                 .collection('pedidos_amizade')
                 .where('para', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
-                .where('estado', isEqualTo: 'pendente')
                 .snapshots(),
             builder: (ctx, snap) {
-              final count = snap.data?.docs.length ?? 0;
+              final count = snap.data?.docs
+                  .where((d) => (d.data() as Map)['estado'] == 'pendente')
+                  .length ?? 0;
               return _drawerItem(
                 icon: Icons.group_outlined,
                 label: 'Amigos',
@@ -4816,14 +4825,17 @@ class _TelaAmigosState extends State<TelaAmigos> {
     super.initState();
     _carregarAmigos();
     // Stream real-time para pedidos pendentes
+    // Filtra só por 'para' para não precisar de índice composto no Firestore
     _pedidosSub = _db
         .collection('pedidos_amizade')
         .where('para', isEqualTo: widget.uid)
-        .where('estado', isEqualTo: 'pendente')
         .snapshots()
         .listen((snap) async {
       final pedidos = <Map<String, dynamic>>[];
       for (final doc in snap.docs) {
+        // Filtrar pendentes em código (evita índice composto)
+        final estado = doc.data()['estado'] as String? ?? '';
+        if (estado != 'pendente') continue;
         final remetenteUid = doc.data()['de'] as String? ?? '';
         if (remetenteUid.isEmpty) continue;
         try {
@@ -5166,57 +5178,99 @@ class _TelaAmigosState extends State<TelaAmigos> {
                       const Divider(height: 24),
                     ],
 
-                    // ── Pedidos pendentes ────────────────────────────
-                    if (_pedidos.isNotEmpty) ...[
-                      const Text('Pedidos recebidos', style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      ..._pedidos.map((p) {
-                        final perfil = p['perfil'] as PerfilUsuario;
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.35)),
-                            borderRadius: BorderRadius.circular(12),
-                            color: azul.withOpacity(0.05),
+                    // ── Inbox de pedidos ────────────────────────────
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _pedidos.isNotEmpty ? azul.withOpacity(0.5) : _tc().withOpacity(0.1),
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                        color: _pedidos.isNotEmpty ? azul.withOpacity(0.06) : Colors.transparent,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.inbox_rounded, color: azul, size: 18),
+                                const SizedBox(width: 8),
+                                const Text('Pedidos de amizade',
+                                    style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
+                                const SizedBox(width: 8),
+                                if (_pedidos.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(color: azul, borderRadius: BorderRadius.circular(10)),
+                                    child: Text('${_pedidos.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                              ],
+                            ),
                           ),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 20,
-                                backgroundColor: azul.withOpacity(0.15),
-                                child: Text(
-                                  perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
-                                  style: const TextStyle(color: azul, fontWeight: FontWeight.bold),
+                          if (_pedidos.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                              child: Text('Nenhum pedido pendente', style: TextStyle(color: _tc38(), fontSize: 13)),
+                            )
+                          else
+                            ..._pedidos.map((p) {
+                              final perfil = p['perfil'] as PerfilUsuario;
+                              return Container(
+                                margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: _tc().withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                child: Row(
                                   children: [
-                                    Text(perfil.nome, style: TextStyle(color: _tc(), fontWeight: FontWeight.bold)),
-                                    if (perfil.nomedeutilizador.isNotEmpty)
-                                      Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
+                                    CircleAvatar(
+                                      radius: 20,
+                                      backgroundColor: azul.withOpacity(0.15),
+                                      backgroundImage: perfil.fotoUrl.isNotEmpty ? NetworkImage(perfil.fotoUrl) as ImageProvider : null,
+                                      child: perfil.fotoUrl.isEmpty
+                                          ? Text(perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                              style: const TextStyle(color: azul, fontWeight: FontWeight.bold))
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(perfil.nome.isNotEmpty ? perfil.nome : 'Utilizador',
+                                              style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 14)),
+                                          if (perfil.nomedeutilizador.isNotEmpty)
+                                            Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 22),
+                                      tooltip: 'Recusar',
+                                      onPressed: () => _recusarPedido(p['uid'] as String, p['docId'] as String),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () => _aceitarPedido(p['uid'] as String, p['docId'] as String),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: azul,
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size(72, 34),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      child: const Text('Aceitar', style: TextStyle(fontSize: 13)),
+                                    ),
                                   ],
                                 ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.check, color: Colors.greenAccent),
-                                onPressed: () => _aceitarPedido(p['uid'] as String, p['docId'] as String),
-                                tooltip: 'Aceitar',
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.close, color: Colors.redAccent),
-                                onPressed: () => _recusarPedido(p['uid'] as String, p['docId'] as String),
-                                tooltip: 'Recusar',
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
-                      const Divider(height: 24),
-                    ],
+                              );
+                            }),
+                        ],
+                      ),
+                    ),
 
                     // ── Lista de amigos ──────────────────────────────
                     Row(
