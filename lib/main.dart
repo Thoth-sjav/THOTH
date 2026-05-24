@@ -936,9 +936,13 @@ class _PomodoroAppState extends State<PomodoroApp>
         // Migração: garantir que o username do utilizador está no índice global
         _migrarUsernameParaIndice();
       }
-    } catch (e) {
-      debugPrint('Erro ao carregar dados do Firestore: $e');
-      if (mounted) setState(() { _aCarregarDados = false; });
+    } catch (e, st) {
+      debugPrint('Erro ao carregar dados do Firestore: $e
+$st');
+      if (mounted) setState(() {
+        _aCarregarDados = false;
+        _buildError = 'Erro ao carregar: $e';
+      });
     }
   }
 
@@ -1029,7 +1033,12 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void initState() {
     super.initState();
-    _audioPlayer = AudioPlayer();
+    try {
+      _audioPlayer = AudioPlayer();
+    } catch (e) {
+      debugPrint('ERRO ao inicializar AudioPlayer: $e');
+      _audioPlayer = AudioPlayer();
+    }
     WidgetsBinding.instance.addObserver(this);
     _carregarDados();
     // Guardar quando o tema muda
@@ -1359,8 +1368,34 @@ class _PomodoroAppState extends State<PomodoroApp>
   // BUILD
   // ---------------------------------------------------------------------------
 
+  String? _buildError;
+
   @override
   Widget build(BuildContext context) {
+    // Mostrar erro de build no ecrã (debug)
+    if (_buildError != null) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
+                const SizedBox(height: 16),
+                const Text('Erro interno:', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                SelectableText(_buildError!, style: const TextStyle(color: Colors.white70, fontSize: 11), textAlign: TextAlign.center),
+                const SizedBox(height: 24),
+                ElevatedButton(onPressed: () => setState(() { _buildError = null; _aCarregarDados = true; _carregarDados(); }), child: const Text('Tentar novamente')),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     // Mostrar splash de carregamento enquanto os dados do Firestore chegam
     if (_aCarregarDados) {
       return ValueListenableBuilder<bool>(
@@ -1386,20 +1421,29 @@ class _PomodoroAppState extends State<PomodoroApp>
       );
     }
 
-    switch (estadoApp) {
-      case EstadoApp.inicio:
-        return _TelaInicial(
-          state: this,
-          countdownAlvoInicial: _countdownAlvoGuardado,
-          countdownMotivoInicial: _countdownMotivoGuardado,
-          todoBlocosJson: _todoBlocosGuardados,
-        );
-      case EstadoApp.cronometro:
-        return _TelaCronometro(state: this);
-      case EstadoApp.fim:
-        return _TelaFim(state: this);
-      case EstadoApp.gerenciar:
-        return _TelaGerenciar(state: this);
+    try {
+      switch (estadoApp) {
+        case EstadoApp.inicio:
+          return _TelaInicial(
+            state: this,
+            countdownAlvoInicial: _countdownAlvoGuardado,
+            countdownMotivoInicial: _countdownMotivoGuardado,
+            todoBlocosJson: _todoBlocosGuardados,
+          );
+        case EstadoApp.cronometro:
+          return _TelaCronometro(state: this);
+        case EstadoApp.fim:
+          return _TelaFim(state: this);
+        case EstadoApp.gerenciar:
+          return _TelaGerenciar(state: this);
+      }
+    } catch (e, st) {
+      debugPrint('ERRO NO BUILD: $e
+$st');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _buildError = e.toString());
+      });
+      return const Scaffold(backgroundColor: Colors.black);
     }
   }
 }
