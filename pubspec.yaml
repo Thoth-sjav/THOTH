@@ -1,5 +1,5 @@
-name: thoth.app
-description: "Aplicação de estudo com técnica Pomodoro"
+name: thoth_app
+description: "Aplicação de estudo com técnica Pomodoro e gamificação."
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -45,6 +45,9 @@ dependencies:
   # Utils
   intl: ^0.19.0
   connectivity_plus: ^5.0.0
+
+  # Persistência Local
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:
