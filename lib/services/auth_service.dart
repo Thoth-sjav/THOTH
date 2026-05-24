@@ -42,8 +42,17 @@ class AuthService {
         idToken: googleAuth.idToken,
       );
 
-      final userCredential = await _auth.signInWithCredential(credential);
-      final user = userCredential.user;
+      UserCredential userCredential;
+
+final currentUser = _auth.currentUser;
+
+if (currentUser != null && currentUser.isAnonymous) {
+  userCredential = await currentUser.linkWithCredential(credential);
+} else {
+  userCredential = await _auth.signInWithCredential(credential);
+}
+
+final user = userCredential.user;
 
       if (user != null) {
         await _criarPerfilSeNaoExistir(user);
