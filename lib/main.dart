@@ -1039,10 +1039,18 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void dispose() {
     _timer?.cancel();
+    // Guardar estado de forma não-bloqueante (fire-and-forget)
+    // Não usar await aqui — dispose() é síncrono
     _salvarEstadoAtual();
-    _guardarTarefasImediato();
-    _guardarTudo();
-    _audioPlayer.dispose();
+    Future(() async {
+      try {
+        await _guardarTarefasImediato();
+        await _guardarTudo();
+      } catch (_) {}
+    });
+    _audioPlayer.stop().then((_) => _audioPlayer.dispose()).catchError((_) {
+      _audioPlayer.dispose();
+    });
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1165,17 +1173,18 @@ class _PomodoroAppState extends State<PomodoroApp>
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   void _tocarSom({bool fim = false}) {
-    try {
-      HapticFeedback.mediumImpact();
-      // Som real: fim de sessão usa som mais dramático, troca de fase usa som suave
-      final asset = fim ? 'sounds/timer_fim.wav' : 'sounds/timer_fase.wav';
-      _audioPlayer.play(AssetSource(asset)).catchError((_) {
-        // fallback silencioso se o asset não existir
-        SystemSound.play(SystemSoundType.click);
-      });
-    } catch (_) {
-      SystemSound.play(SystemSoundType.click);
-    }
+    // Disparar em microtask para não bloquear o frame actual
+    Future.microtask(() async {
+      try {
+        HapticFeedback.mediumImpact();
+        // Parar qualquer som anterior antes de iniciar o novo
+        await _audioPlayer.stop();
+        final asset = fim ? 'sounds/timer_fim.wav' : 'sounds/timer_fase.wav';
+        await _audioPlayer.play(AssetSource(asset));
+      } catch (_) {
+        try { SystemSound.play(SystemSoundType.click); } catch (_) {}
+      }
+    });
   }
 
   void _avancarFase() {
@@ -1240,7 +1249,8 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   void finalizar() {
     _timer?.cancel();
-    _tocarSom(fim: true);
+
+    // Actualizar estado em memória imediatamente
     if (tarefaAtual != null) {
       final t = tarefaAtual!;
       t
@@ -1250,15 +1260,7 @@ class _PomodoroAppState extends State<PomodoroApp>
         ..segundosSalvos = 0;
       ultimaTarefa = t;
 
-      // Persistir imediatamente a tarefa concluída no Firestore
-      final data = t.toJson();
-      final idx = tarefas.indexWhere((x) => x.id == t.id);
-      if (idx >= 0) data['ordem'] = idx;
-      _tarefasCol.doc(t.id).set(data).catchError((e) {
-        debugPrint('Erro ao guardar tarefa concluída: $e');
-      });
-
-      // Registar sessão concluída
+      // Registar sessão concluída em memória
       sessoes.add(SessaoConcluida(
         tarefaNome: t.nome.isEmpty ? 'Sem nome' : t.nome,
         dataConclusao: DateTime.now(),
@@ -1266,24 +1268,47 @@ class _PomodoroAppState extends State<PomodoroApp>
         tempoFocoSegundos: t.ciclos * t.estudo,
       ));
     }
+
+    // Navegar para tela de fim imediatamente — sem esperar I/O
     setState(() => estadoApp = EstadoApp.fim);
-    _guardarTudo();
-    if (sessoes.isNotEmpty) {
-      _guardarSessao(sessoes.last);
-      // Se estudou hoje, cancela a notificação das 20h
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) _cancelarNotifSeEstudouHoje(uid);
-      // Ganhar 1 freeze a cada 7 dias de streak
-      final streakAtual = StreakInfo.calcularComFreeze(sessoes, _freezeDias);
-      if (streakAtual.dias > 0 && streakAtual.dias % 7 == 0) {
-        _ganharStreakFreeze();
+
+    // Tocar som depois do setState para não bloquear o frame
+    _tocarSom(fim: true);
+
+    // Persistir no Firestore em background (não bloqueia a UI)
+    Future(() async {
+      try {
+        if (ultimaTarefa != null) {
+          final t = ultimaTarefa!;
+          final data = t.toJson();
+          final idx = tarefas.indexWhere((x) => x.id == t.id);
+          if (idx >= 0) data['ordem'] = idx;
+          await _tarefasCol.doc(t.id).set(data);
+        }
+
+        await _guardarTudo();
+
+        if (sessoes.isNotEmpty) {
+          await _guardarSessao(sessoes.last);
+          // Se estudou hoje, cancela a notificação das 20h
+          final uid = FirebaseAuth.instance.currentUser?.uid;
+          if (uid != null) _cancelarNotifSeEstudouHoje(uid);
+          // Ganhar 1 freeze a cada 7 dias de streak
+          final streakAtual = StreakInfo.calcularComFreeze(sessoes, _freezeDias);
+          if (streakAtual.dias > 0 && streakAtual.dias % 7 == 0) {
+            if (mounted) _ganharStreakFreeze();
+          }
+        }
+
+        // Limpar estado do timer no Firestore
+        await _configDoc.set({
+          'timerAtivo': false,
+          'timerReferencia': null,
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Erro ao persistir dados após finalizar: $e');
       }
-    }
-    // Limpar estado do timer no Firestore
-    _configDoc.set({
-      'timerAtivo': false,
-      'timerReferencia': null,
-    }, SetOptions(merge: true));
+    });
   }
 
   void reset() {
