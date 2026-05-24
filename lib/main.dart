@@ -758,7 +758,6 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   // Loading state
   bool _aCarregarDados = true;
-  String? _erroCarregamento;
 
   // ---------------------------------------------------------------------------
   // CICLO DE VIDA
@@ -766,7 +765,7 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   // ── Firestore helpers ───────────────────────────────────────────────────────
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
   DocumentReference get _configDoc  => _db.collection('users').doc(_uid).collection('config').doc('dados');
   DocumentReference get _perfilDoc  => _db.collection('users').doc(_uid).collection('perfil').doc('dados');
   CollectionReference get _tarefasCol => _db.collection('users').doc(_uid).collection('tarefas');
@@ -864,10 +863,6 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _carregarDados() async {
-    if (_uid.isEmpty) {
-      if (mounted) setState(() { _aCarregarDados = false; });
-      return;
-    }
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
@@ -943,10 +938,7 @@ class _PomodoroAppState extends State<PomodoroApp>
       }
     } catch (e) {
       debugPrint('Erro ao carregar dados do Firestore: $e');
-      if (mounted) setState(() {
-        _aCarregarDados = false;
-        _erroCarregamento = e.toString();
-      });
+      if (mounted) setState(() { _aCarregarDados = false; });
     }
   }
 
@@ -970,7 +962,6 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _guardarTudo() async {
-    if (_uid.isEmpty) return;
     final batch = _db.batch();
 
     // Config
@@ -1012,7 +1003,6 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   Future<void> _guardarSessao(SessaoConcluida s) async {
-    if (_uid.isEmpty) return;
     await _sessoesCol.add(s.toJson());
   }
 
@@ -1020,7 +1010,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   /// Mais leve que _guardarTudo() — só escreve as tarefas.
   /// Usado ao sair da app ou mudar de fase para garantir que nada se perde.
   Future<void> _guardarTarefasImediato() async {
-    if (_uid.isEmpty || tarefas.isEmpty) return;
+    if (tarefas.isEmpty) return;
     try {
       final batch = _db.batch();
       for (int i = 0; i < tarefas.length; i++) {
@@ -1036,38 +1026,23 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   @override
-  late final VoidCallback _temaListener;
-
-  @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _carregarDados();
-    // Guardar quando o tema muda — guardar referência para remover no dispose
-    _temaListener = () {
-      if (mounted) {
-        _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
-      }
-    };
-    temaEscuro.addListener(_temaListener);
+    // Guardar quando o tema muda
+    temaEscuro.addListener(() {
+      _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
+    });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
-    temaEscuro.removeListener(_temaListener);
-    // Guardar estado de forma não-bloqueante (fire-and-forget)
-    // Não usar await aqui — dispose() é síncrono
     _salvarEstadoAtual();
-    Future(() async {
-      try {
-        await _guardarTarefasImediato();
-        await _guardarTudo();
-      } catch (_) {}
-    });
-    _audioPlayer.stop().then((_) => _audioPlayer.dispose()).catchError((_) {
-      _audioPlayer.dispose();
-    });
+    _guardarTarefasImediato();
+    _guardarTudo();
+    _audioPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1162,7 +1137,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   void _salvarEstadoAtual() {
-    if (tarefaAtual == null || _uid.isEmpty) return;
+    if (tarefaAtual == null) return;
     tarefaAtual!
       ..cicloSalvo = cicloAtual
       ..estavaNoDescanso = estaNoDescanso
@@ -1190,11 +1165,9 @@ class _PomodoroAppState extends State<PomodoroApp>
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   void _tocarSom({bool fim = false}) {
-    // Disparar em microtask para não bloquear o frame actual
     Future.microtask(() async {
       try {
         HapticFeedback.mediumImpact();
-        // Parar qualquer som anterior antes de iniciar o novo
         await _audioPlayer.stop();
         final asset = fim ? 'sounds/timer_fim.wav' : 'sounds/timer_fase.wav';
         await _audioPlayer.play(AssetSource(asset));
@@ -1267,7 +1240,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   void finalizar() {
     _timer?.cancel();
 
-    // Actualizar estado em memória imediatamente
+    // Atualizar estado em memória e navegar imediatamente
     if (tarefaAtual != null) {
       final t = tarefaAtual!;
       t
@@ -1276,8 +1249,6 @@ class _PomodoroAppState extends State<PomodoroApp>
         ..estavaNoDescanso = false
         ..segundosSalvos = 0;
       ultimaTarefa = t;
-
-      // Registar sessão concluída em memória
       sessoes.add(SessaoConcluida(
         tarefaNome: t.nome.isEmpty ? 'Sem nome' : t.nome,
         dataConclusao: DateTime.now(),
@@ -1286,44 +1257,38 @@ class _PomodoroAppState extends State<PomodoroApp>
       ));
     }
 
-    // Navegar para tela de fim imediatamente — sem esperar I/O
+    // UI primeiro — sem esperar I/O
     setState(() => estadoApp = EstadoApp.fim);
-
-    // Tocar som depois do setState para não bloquear o frame
     _tocarSom(fim: true);
 
-    // Persistir no Firestore em background (não bloqueia a UI)
-    Future(() async {
+    // Persistir em background
+    Future.microtask(() async {
       try {
         if (ultimaTarefa != null) {
           final t = ultimaTarefa!;
           final data = t.toJson();
           final idx = tarefas.indexWhere((x) => x.id == t.id);
           if (idx >= 0) data['ordem'] = idx;
-          await _tarefasCol.doc(t.id).set(data);
+          _tarefasCol.doc(t.id).set(data).catchError((e) {
+            debugPrint('Erro ao guardar tarefa concluída: $e');
+          });
         }
-
-        await _guardarTudo();
-
+        _guardarTudo();
         if (sessoes.isNotEmpty) {
-          await _guardarSessao(sessoes.last);
-          // Se estudou hoje, cancela a notificação das 20h
+          _guardarSessao(sessoes.last);
           final uid = FirebaseAuth.instance.currentUser?.uid;
           if (uid != null) _cancelarNotifSeEstudouHoje(uid);
-          // Ganhar 1 freeze a cada 7 dias de streak
           final streakAtual = StreakInfo.calcularComFreeze(sessoes, _freezeDias);
           if (streakAtual.dias > 0 && streakAtual.dias % 7 == 0) {
             if (mounted) _ganharStreakFreeze();
           }
         }
-
-        // Limpar estado do timer no Firestore
-        await _configDoc.set({
+        _configDoc.set({
           'timerAtivo': false,
           'timerReferencia': null,
         }, SetOptions(merge: true));
       } catch (e) {
-        debugPrint('Erro ao persistir dados após finalizar: $e');
+        debugPrint('Erro ao persistir após finalizar: $e');
       }
     });
   }
@@ -1395,51 +1360,24 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   Widget build(BuildContext context) {
     // Mostrar splash de carregamento enquanto os dados do Firestore chegam
-    if (_aCarregarDados || _erroCarregamento != null) {
+    if (_aCarregarDados) {
       return ValueListenableBuilder<bool>(
         valueListenable: temaEscuro,
         builder: (_, escuro, __) => Scaffold(
           backgroundColor: escuro ? Colors.black : Colors.white,
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('T h o t h',
-                      style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1D81C7),
-                          letterSpacing: 6)),
-                  const SizedBox(height: 32),
-                  if (_erroCarregamento == null)
-                    const CircularProgressIndicator(color: Color(0xFF1D81C7))
-                  else ...[
-                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
-                    const SizedBox(height: 16),
-                    const Text('Erro ao carregar dados:',
-                        style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      _erroCarregamento!,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _aCarregarDados = true;
-                          _erroCarregamento = null;
-                        });
-                        _carregarDados();
-                      },
-                      child: const Text('Tentar novamente'),
-                    ),
-                  ],
-                ],
-              ),
+          body: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('T h o t h',
+                    style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1D81C7),
+                        letterSpacing: 6)),
+                SizedBox(height: 32),
+                CircularProgressIndicator(color: Color(0xFF1D81C7)),
+              ],
             ),
           ),
         ),
@@ -3676,7 +3614,7 @@ class _TelaTodoState extends State<TelaTodo> {
   }
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
   CollectionReference get _todoCol => _db.collection('users').doc(_uid).collection('todo');
 
   Future<void> _carregarBlocos() async {
@@ -4848,7 +4786,7 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
   static const azul = Color(0xFF1D81C7);
 
   FirebaseFirestore get _db => FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
   DocumentReference get _configDoc =>
       _db.collection('users').doc(_uid).collection('config').doc('dados');
 
@@ -6851,7 +6789,7 @@ class _TelaLeaderboardState extends State<TelaLeaderboard> with SingleTickerProv
   static const azul = Color(0xFF1D81C7);
   late TabController _tabCtrl;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
   List<Map<String, dynamic>> _rankingStreak = [];
   List<Map<String, dynamic>> _rankingTempo = [];
