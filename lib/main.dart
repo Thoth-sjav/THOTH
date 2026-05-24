@@ -936,10 +936,25 @@ class _PomodoroAppState extends State<PomodoroApp>
         // Migração: garantir que o username do utilizador está no índice global
         _migrarUsernameParaIndice();
       }
-    } catch (e) {
-      debugPrint('Erro ao carregar dados do Firestore: $e');
-      if (mounted) setState(() { _aCarregarDados = false; });
-    }
+   } catch (e, s) {
+  debugPrint('Erro Firestore: $e');
+  debugPrint('$s');
+
+  if (mounted) {
+    setState(() {
+      _aCarregarDados = false;
+    });
+
+    Future.microtask(() {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erro: $e'),
+          duration: const Duration(seconds: 10),
+        ),
+      );
+    });
+  }
+}
   }
 
   // Problema 1 — garante que utilizadores existentes ficam no índice global
