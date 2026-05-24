@@ -880,6 +880,8 @@ class _PomodoroAppState extends State<PomodoroApp>
     try {
       // Config (tema + countdown)
       final configSnap = await _configDoc.get();
+        debugPrint('PASSO 2 - config carregada');
+        
       if (configSnap.exists) {
         final d = configSnap.data() as Map<String, dynamic>;
         if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
