@@ -356,12 +356,25 @@ class SessaoConcluida {
         'tempoFocoSegundos': tempoFocoSegundos,
       };
 
-  factory SessaoConcluida.fromJson(Map<String, dynamic> j) => SessaoConcluida(
-        tarefaNome: j['tarefaNome'] as String? ?? '',
-        dataConclusao: DateTime.parse(j['dataConclusao'] as String),
-        ciclosConcluidos: j['ciclosConcluidos'] as int? ?? 0,
-        tempoFocoSegundos: j['tempoFocoSegundos'] as int? ?? 0,
-      );
+factory SessaoConcluida.fromJson(
+    Map<String, dynamic> j) =>
+    SessaoConcluida(
+      tarefaNome:
+          j['tarefaNome'] as String? ?? '',
+      dataConclusao:
+          DateTime.tryParse(
+            j['dataConclusao']
+                    as String? ??
+                '',
+          ) ??
+          DateTime.now(),
+      ciclosConcluidos:
+          j['ciclosConcluidos'] as int? ??
+              0,
+      tempoFocoSegundos:
+          j['tempoFocoSegundos'] as int? ??
+              0,
+    );
 }
 
 // =============================================================================
