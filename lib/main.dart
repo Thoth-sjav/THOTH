@@ -1006,6 +1006,25 @@ class _PomodoroAppState extends State<PomodoroApp>
     await _sessoesCol.add(s.toJson());
   }
 
+  /// Persiste imediatamente o progresso de todas as tarefas no Firestore.
+  /// Mais leve que _guardarTudo() — só escreve as tarefas.
+  /// Usado ao sair da app ou mudar de fase para garantir que nada se perde.
+  Future<void> _guardarTarefasImediato() async {
+    if (tarefas.isEmpty) return;
+    try {
+      final batch = _db.batch();
+      for (int i = 0; i < tarefas.length; i++) {
+        final t = tarefas[i];
+        final data = t.toJson();
+        data['ordem'] = i;
+        batch.set(_tarefasCol.doc(t.id), data);
+      }
+      await batch.commit();
+    } catch (e) {
+      debugPrint('Erro ao guardar tarefas imediato: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1020,6 +1039,9 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void dispose() {
     _timer?.cancel();
+    _salvarEstadoAtual();
+    _guardarTarefasImediato();
+    _guardarTudo();
     _audioPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -1030,9 +1052,11 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
       _salvarEstadoAtual();
       _guardarTudo();
+      _guardarTarefasImediato();
       if (estadoApp == EstadoApp.cronometro && !pausado) {
         // Guardar referência absoluta para continuar ao regressar
         _guardarEstadoTimer();
@@ -1120,6 +1144,13 @@ class _PomodoroAppState extends State<PomodoroApp>
       ..segundosSalvos = segundosRestantes
       ..progressoSalvo = _calcularProgressoGlobal();
     ultimaTarefa = tarefaAtual;
+    // Persistir a tarefa atual imediatamente no Firestore
+    final data = tarefaAtual!.toJson();
+    final idx = tarefas.indexWhere((t) => t.id == tarefaAtual!.id);
+    if (idx >= 0) data['ordem'] = idx;
+    _tarefasCol.doc(tarefaAtual!.id).set(data).catchError((e) {
+      debugPrint('Erro ao guardar tarefa atual: $e');
+    });
   }
 
   double _calcularProgressoGlobal() {
@@ -1194,6 +1225,14 @@ class _PomodoroAppState extends State<PomodoroApp>
           ..cicloSalvo = 1
           ..estavaNoDescanso = false
           ..segundosSalvos = ultimaTarefa!.estudo;
+        // Persistir o reset no Firestore
+        final t = ultimaTarefa!;
+        final data = t.toJson();
+        final idx = tarefas.indexWhere((x) => x.id == t.id);
+        if (idx >= 0) data['ordem'] = idx;
+        _tarefasCol.doc(t.id).set(data).catchError((e) {
+          debugPrint('Erro ao descartar progresso: $e');
+        });
       }
       ultimaTarefa = null;
     });
@@ -1210,6 +1249,14 @@ class _PomodoroAppState extends State<PomodoroApp>
         ..estavaNoDescanso = false
         ..segundosSalvos = 0;
       ultimaTarefa = t;
+
+      // Persistir imediatamente a tarefa concluída no Firestore
+      final data = t.toJson();
+      final idx = tarefas.indexWhere((x) => x.id == t.id);
+      if (idx >= 0) data['ordem'] = idx;
+      _tarefasCol.doc(t.id).set(data).catchError((e) {
+        debugPrint('Erro ao guardar tarefa concluída: $e');
+      });
 
       // Registar sessão concluída
       sessoes.add(SessaoConcluida(
