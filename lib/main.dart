@@ -934,13 +934,6 @@ sessoes.sort(
       if (ultimaId != null) {
         try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
       }
-
-      // Sessões
-      final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
-      sessoes = sessoesSnap.docs
-          .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
-          .toList();
-
       // Todo blocos — lidos em TelaTodo via Firestore diretamente
       // Guardamos snapshot JSON para passar ao widget
       final todoSnap = await _todoCol.get();
