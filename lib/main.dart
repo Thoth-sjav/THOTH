@@ -969,15 +969,11 @@ sessoes.sort(
         // Migração: garantir que o username do utilizador está no índice global
         _migrarUsernameParaIndice();
       }
-   } catch (e, s) {
+} catch (e, s) {
   debugPrint('Erro Firestore: $e');
   debugPrint('$s');
 
   if (mounted) {
-    setState(() {
-      _aCarregarDados = false;
-    });
-
     Future.microtask(() {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -987,8 +983,14 @@ sessoes.sort(
       );
     });
   }
-}
+} finally {
+  if (mounted) {
+    setState(() {
+      _aCarregarDados = false;
+    });
   }
+}
+}
 
   // Problema 1 — garante que utilizadores existentes ficam no índice global
   Future<void> _migrarUsernameParaIndice() async {
