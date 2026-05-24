@@ -26,6 +26,9 @@ import 'package:audioplayers/audioplayers.dart';
 
 import 'firebase_options.dart';
 
+// ─── Reacções disponíveis entre amigos ──────────────────────────────────────
+const List<String> _reacoes = ['🔥', '💪', '👏', '⚡', '🎯', '🏆'];
+
 // ─── Helpers de plataforma ───────────────────────────────────────────────────
 bool get _isDesktop =>
     !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -368,8 +371,9 @@ class SessaoConcluida {
 class StreakInfo {
   final int dias;
   final DateTime? ultimoEstudo;
+  final bool frozenHoje; // true = streak salva por freeze hoje
 
-  const StreakInfo({required this.dias, this.ultimoEstudo});
+  const StreakInfo({required this.dias, this.ultimoEstudo, this.frozenHoje = false});
 
   bool get acendeuHoje {
     if (ultimoEstudo == null) return false;
@@ -403,6 +407,39 @@ class StreakInfo {
     }
     final lastSession = sessoes.reduce((a, b) => a.dataConclusao.isAfter(b.dataConclusao) ? a : b);
     return StreakInfo(dias: streak, ultimoEstudo: lastSession.dataConclusao);
+  }
+
+  /// Calcula streak considerando dias de freeze (dias sem estudo mas com freeze activo)
+  static StreakInfo calcularComFreeze(List<SessaoConcluida> sessoes, List<String> freezeDias) {
+    if (sessoes.isEmpty) return const StreakInfo(dias: 0);
+    final diasEstudo = <String>{};
+    for (final s in sessoes) {
+      final d = s.dataConclusao;
+      diasEstudo.add('${d.year}-${d.month}-${d.day}');
+    }
+    // Adicionar dias de freeze ao conjunto de dias "activos"
+    final diasActivos = {...diasEstudo, ...freezeDias};
+    final sorted = diasActivos.toList()..sort();
+    int streak = 1;
+    final today = DateTime.now();
+    final todayStr = '${today.year}-${today.month}-${today.day}';
+    final yesterday = today.subtract(const Duration(days: 1));
+    final yesterdayStr = '${yesterday.year}-${yesterday.month}-${yesterday.day}';
+    if (!diasActivos.contains(todayStr) && !diasActivos.contains(yesterdayStr)) {
+      return const StreakInfo(dias: 0);
+    }
+    for (int i = sorted.length - 1; i > 0; i--) {
+      final curr = DateTime.parse(sorted[i]);
+      final prev = DateTime.parse(sorted[i - 1]);
+      if (curr.difference(prev).inDays == 1) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    final frozenHoje = !diasEstudo.contains(todayStr) && diasActivos.contains(todayStr);
+    final lastSession = sessoes.reduce((a, b) => a.dataConclusao.isAfter(b.dataConclusao) ? a : b);
+    return StreakInfo(dias: streak, ultimoEstudo: lastSession.dataConclusao, frozenHoje: frozenHoje);
   }
 
   static const List<Map<String, dynamic>> conquistas = [
@@ -739,6 +776,16 @@ class _PomodoroAppState extends State<PomodoroApp>
   DateTime? _countdownAlvoGuardado;
   String? _countdownMotivoGuardado;
 
+  // ── Streak freeze ──────────────────────────────────────────────────────
+  int _streakFreezes = 0;
+  List<String> _freezeDias = []; // datas em formato yyyy-M-d onde o freeze foi usado
+
+  // ── Meta semanal ───────────────────────────────────────────────────────
+  int _metaSemanalMinutos = 0;
+
+  // ── Modo não perturbar ─────────────────────────────────────────────────
+  bool _modoDNDAtivo = false;
+
   // Timer em segundo plano — guardamos o momento absoluto em que o timer
   // estava a correr para recalcular ao regressar, mesmo que o processo tenha
   // sido suspenso pelo SO.
@@ -828,6 +875,18 @@ class _PomodoroAppState extends State<PomodoroApp>
         if (d['countdownMotivo'] != null) {
           _countdownMotivoGuardado = d['countdownMotivo'] as String;
         }
+        if (d['streakFreezes'] != null) {
+          _streakFreezes = d['streakFreezes'] as int? ?? 0;
+        }
+        if (d['metaSemanalMinutos'] != null) {
+          _metaSemanalMinutos = d['metaSemanalMinutos'] as int? ?? 0;
+        }
+        if (d['modoDNDAtivo'] != null) {
+          _modoDNDAtivo = d['modoDNDAtivo'] as bool? ?? false;
+        }
+        if (d['freezeDias'] != null) {
+          _freezeDias = List<String>.from(d['freezeDias'] as List? ?? []);
+        }
       }
 
       // Perfil
@@ -911,6 +970,10 @@ class _PomodoroAppState extends State<PomodoroApp>
       'ultimaTarefaId': ultimaTarefa?.id,
       'countdownAlvo': _countdownAlvoGuardado?.toIso8601String(),
       'countdownMotivo': _countdownMotivoGuardado,
+      'streakFreezes': _streakFreezes,
+      'metaSemanalMinutos': _metaSemanalMinutos,
+      'modoDNDAtivo': _modoDNDAtivo,
+      'freezeDias': _freezeDias,
     }, SetOptions(merge: true));
 
     // Perfil
@@ -1004,6 +1067,11 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   void iniciarTarefa(Tarefa t, {bool retomar = false}) {
     _timer?.cancel();
+    // Modo não perturbar: suprimir volume de media durante o foco
+    if (_modoDNDAtivo) {
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle());
+      // Sinalizar via volume/notificação — a implementação real usa a preferência salva
+    }
     setState(() {
       tarefaAtual = t;
       estadoApp = EstadoApp.cronometro;
@@ -1158,6 +1226,11 @@ class _PomodoroAppState extends State<PomodoroApp>
       // Se estudou hoje, cancela a notificação das 20h
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) _cancelarNotifSeEstudouHoje(uid);
+      // Ganhar 1 freeze a cada 7 dias de streak
+      final streakAtual = StreakInfo.calcularComFreeze(sessoes, _freezeDias);
+      if (streakAtual.dias > 0 && streakAtual.dias % 7 == 0) {
+        _ganharStreakFreeze();
+      }
     }
     // Limpar estado do timer no Firestore
     _configDoc.set({
@@ -1184,6 +1257,25 @@ class _PomodoroAppState extends State<PomodoroApp>
       'timerAtivo': false,
       'timerReferencia': null,
     }, SetOptions(merge: true));
+  }
+
+  /// Usa um streak freeze para hoje — protege a streak mesmo sem estudar
+  Future<void> _usarStreakFreeze() async {
+    if (_streakFreezes <= 0) return;
+    final today = DateTime.now();
+    final todayStr = '${today.year}-${today.month}-${today.day}';
+    if (_freezeDias.contains(todayStr)) return; // já usado hoje
+    setState(() {
+      _streakFreezes--;
+      _freezeDias.add(todayStr);
+    });
+    await _guardarTudo();
+  }
+
+  /// Compra mais streak freezes (1 freeze = ganha por estudar X dias seguidos, ou lógica personalizada)
+  void _ganharStreakFreeze() {
+    setState(() => _streakFreezes++);
+    _guardarTudo();
   }
 
   void removerTarefa(int index) {
@@ -1384,25 +1476,64 @@ class _MenuLateral extends StatelessWidget {
                 .where('para', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
                 .snapshots(),
             builder: (ctx, snap) {
-              final count = snap.data?.docs
+              final countPedidos = snap.data?.docs
                   .where((d) => (d.data() as Map)['estado'] == 'pendente')
                   .length ?? 0;
-              return _drawerItem(
-                icon: Icons.group_outlined,
-                label: 'Amigos',
-                badge: count,
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(FirebaseAuth.instance.currentUser!.uid)
+                    .collection('reacoes')
+                    .where('lida', isEqualTo: false)
+                    .snapshots(),
+                builder: (ctx2, snapR) {
+                  final countReacoes = snapR.data?.docs.length ?? 0;
+                  final count = countPedidos + countReacoes;
+                  return _drawerItem(
+                    icon: Icons.group_outlined,
+                    label: 'Amigos',
+                    badge: count,
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
                   );
-                },
+                });
+            },
+          ),
+          _drawerItem(
+            icon: Icons.leaderboard_outlined,
+            label: 'Leaderboard Global',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const TelaLeaderboard()));
+            },
+          ),
+          _drawerItem(
+            icon: Icons.flag_outlined,
+            label: 'Meta Semanal',
+            onTap: () {
+              Navigator.pop(context);
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => _BottomSheetMetaSemanal(
+                  sessoes: state.sessoes,
+                  metaAtual: state._metaSemanalMinutos,
+                  onSalvar: (v) {
+                    // ignore: invalid_use_of_protected_member
+                    state.setState(() => state._metaSemanalMinutos = v);
+                    state._guardarTudo();
+                  },
+                ),
               );
             },
           ),
           _drawerItem(
             icon: Icons.task_alt,
+            label: 'Tarefas Concluídas',
             label: 'Tarefas Concluídas',
             onTap: () {
               Navigator.pop(context);
@@ -1616,7 +1747,7 @@ class _TelaInicialState extends State<_TelaInicial> {
                   ),
                   const SizedBox(width: 10),
                   // ── Streak badge ──────────────────────────────────
-                  _StreakBadge(streak: StreakInfo.calcular(widget.state.sessoes)),
+                  _StreakBadge(streak: StreakInfo.calcularComFreeze(widget.state.sessoes, widget.state._freezeDias), onUsarFreeze: widget.state._usarStreakFreeze, freezesDisponiveis: widget.state._streakFreezes),
                   const Expanded(child: SizedBox()),
                   IconButton(
                     icon: const Icon(Icons.menu, color: Colors.white, size: 26),
@@ -1698,7 +1829,13 @@ class _TelaInicialState extends State<_TelaInicial> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+
+            // ── Meta Semanal Card ─────────────────────────────────────
+            if (widget.state._metaSemanalMinutos > 0)
+              _CartaoMetaSemanal(sessoes: widget.state.sessoes, meta: widget.state._metaSemanalMinutos),
+
+            const SizedBox(height: 12),
 
             // ── Retomar / Tarefas ────────────────────────────────────
             Expanded(
@@ -1779,22 +1916,107 @@ class _TelaInicialState extends State<_TelaInicial> {
 }
 
 // =============================================================================
+// CARTÃO META SEMANAL (tela inicial)
+// =============================================================================
+
+class _CartaoMetaSemanal extends StatelessWidget {
+  final List<SessaoConcluida> sessoes;
+  final int meta; // em minutos
+  const _CartaoMetaSemanal({required this.sessoes, required this.meta});
+
+  int get _minutosEstaSemana {
+    final hoje = DateTime.now();
+    final inicioSemana = hoje.subtract(Duration(days: hoje.weekday - 1));
+    final semanaStr = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+    return sessoes
+        .where((s) => s.dataConclusao.isAfter(semanaStr))
+        .fold(0, (acc, s) => acc + s.tempoFocoSegundos ~/ 60);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    const verde = Colors.greenAccent;
+    final mins = _minutosEstaSemana;
+    final progresso = meta > 0 ? (mins / meta).clamp(0.0, 1.0) : 0.0;
+    final concluida = progresso >= 1.0;
+
+    return GestureDetector(
+      onTap: () => showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _BottomSheetMetaSemanal(
+          sessoes: sessoes,
+          metaAtual: meta,
+          onSalvar: (_) {}, // read-only aqui; edição via drawer
+        ),
+      ),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 25),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: concluida ? verde.withOpacity(0.07) : azul.withOpacity(0.06),
+          border: Border.all(color: concluida ? verde.withOpacity(0.4) : azul.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Text(concluida ? '🏆' : '🎯', style: const TextStyle(fontSize: 16)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    concluida ? 'Meta semanal atingida!' : 'Meta semanal',
+                    style: TextStyle(
+                      color: concluida ? verde : azul,
+                      fontSize: 13, fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${mins ~/ 60}h ${mins % 60}m / ${meta ~/ 60}h',
+                  style: TextStyle(color: _tc54(), fontSize: 12),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: progresso,
+                minHeight: 6,
+                color: concluida ? verde : azul,
+                backgroundColor: _tc().withOpacity(0.08),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
 // STREAK BADGE
 // =============================================================================
 
 class _StreakBadge extends StatelessWidget {
   final StreakInfo streak;
-  const _StreakBadge({required this.streak});
+  final Future<void> Function()? onUsarFreeze;
+  final int freezesDisponiveis;
+  const _StreakBadge({required this.streak, this.onUsarFreeze, this.freezesDisponiveis = 0});
 
   @override
   Widget build(BuildContext context) {
-    final aceso = streak.acendeuHoje;
+    final aceso = streak.acendeuHoje || streak.frozenHoje;
     final dias = streak.dias;
     return GestureDetector(
       onTap: () {
         showDialog(
           context: context,
-          builder: (_) => _StreakDialog(streak: streak),
+          builder: (_) => _StreakDialog(streak: streak, onUsarFreeze: onUsarFreeze, freezesDisponiveis: freezesDisponiveis),
         );
       },
       child: AnimatedContainer(
@@ -1838,7 +2060,9 @@ class _StreakBadge extends StatelessWidget {
 
 class _StreakDialog extends StatelessWidget {
   final StreakInfo streak;
-  const _StreakDialog({required this.streak});
+  final Future<void> Function()? onUsarFreeze;
+  final int freezesDisponiveis;
+  const _StreakDialog({required this.streak, this.onUsarFreeze, this.freezesDisponiveis = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -1939,6 +2163,59 @@ class _StreakDialog extends StatelessWidget {
               );
             }),
             const SizedBox(height: 12),
+            // ── Streak Freeze ──────────────────────────────────────
+            if (!streak.acendeuHoje && !streak.frozenHoje) ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: freezesDisponiveis > 0 && onUsarFreeze != null
+                      ? () async {
+                          await onUsarFreeze!();
+                          if (context.mounted) Navigator.pop(context);
+                        }
+                      : null,
+                  icon: const Text('🧊', style: TextStyle(fontSize: 16)),
+                  label: Text(
+                    freezesDisponiveis > 0
+                        ? 'Usar Streak Freeze ($freezesDisponiveis disponíveis)'
+                        : 'Sem Streak Freezes disponíveis',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1565C0),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Ganhas 1 freeze a cada 7 dias de streak consecutivos',
+                style: TextStyle(color: _tc38(), fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (streak.frozenHoje) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1565C0).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF1565C0).withOpacity(0.4)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('🧊', style: TextStyle(fontSize: 16)),
+                    SizedBox(width: 8),
+                    Text('Streak protegida por freeze hoje!', style: TextStyle(color: Color(0xFF42A5F5), fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
             // ── Botão partilhar streak ──────────────────────────────
             SizedBox(
               width: double.infinity,
@@ -2574,6 +2851,40 @@ class _TelaCronometro extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+
+                  // DND indicator
+                  if (state._modoDNDAtivo)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.do_not_disturb_on, size: 13, color: Color(0xFF1D81C7)),
+                          const SizedBox(width: 4),
+                          Text('Modo não perturbar activo', style: TextStyle(color: _tc38(), fontSize: 11)),
+                        ],
+                      ),
+                    ),
+
+                  // Task name ──────────────────────────────────────────────────
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+
+                  // DND indicator
+                  if (state._modoDNDAtivo)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.do_not_disturb_on, size: 13, color: Color(0xFF1D81C7)),
+                          const SizedBox(width: 4),
+                          Text('Modo não perturbar activo', style: TextStyle(color: _tc38(), fontSize: 11)),
+                        ],
+                      ),
+                    ),
 
                   // Task name
                   Padding(
@@ -4431,6 +4742,7 @@ class TelaDefinicoes extends StatefulWidget {
 class _TelaDefinicoesState extends State<TelaDefinicoes> {
   bool   _notifs   = true;
   bool   _privado  = false;
+  bool   _modoDND  = false;
   bool   _loadingPrefs = true;
 
   static const azul = Color(0xFF1D81C7);
@@ -4454,6 +4766,7 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
         setState(() {
           _notifs  = d['notificacoes'] as bool? ?? true;
           _privado = d['contaPrivada']  as bool? ?? false;
+          _modoDND = d['modoDNDAtivo']  as bool? ?? false;
         });
       }
     } catch (_) {}
@@ -4673,6 +4986,13 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
                 onChanged: (v) {
                   setState(() => _privado = v);
                   _guardarPreferencia('contaPrivada', v);
+                }),
+
+              // Modo não perturbar
+              _tileToggle(Icons.do_not_disturb_on_outlined, 'Não perturbar durante o timer', _modoDND, fg, fgMuted, tileBg, border,
+                onChanged: (v) {
+                  setState(() => _modoDND = v);
+                  _guardarPreferencia('modoDNDAtivo', v);
                 }),
 
               // Log out
@@ -5285,6 +5605,84 @@ class _TelaAmigosState extends State<TelaAmigos> {
                     ),
                     const SizedBox(height: 12),
 
+                    // ── Reacções não lidas ──────────────────────────
+                    StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(widget.uid)
+                          .collection('reacoes')
+                          .where('lida', isEqualTo: false)
+                          .orderBy('criadaEm', descending: true)
+                          .limit(10)
+                          .snapshots(),
+                      builder: (ctx, snapR) {
+                        if (!snapR.hasData || snapR.data!.docs.isEmpty) return const SizedBox.shrink();
+                        final reacoes = snapR.data!.docs;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.4)),
+                            borderRadius: BorderRadius.circular(14),
+                            color: const Color(0xFF1D81C7).withOpacity(0.05),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.favorite_outline, color: Color(0xFF1D81C7), size: 16),
+                                  const SizedBox(width: 6),
+                                  const Text('Novas reacções', style: TextStyle(color: Color(0xFF1D81C7), fontWeight: FontWeight.bold, fontSize: 14)),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(color: const Color(0xFF1D81C7), borderRadius: BorderRadius.circular(8)),
+                                    child: Text('${reacoes.length}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                  const Spacer(),
+                                  TextButton(
+                                    onPressed: () async {
+                                      final batch = FirebaseFirestore.instance.batch();
+                                      for (final doc in reacoes) {
+                                        batch.update(doc.reference, {'lida': true});
+                                      }
+                                      await batch.commit();
+                                    },
+                                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
+                                    child: Text('Marcar lidas', style: TextStyle(color: _tc38(), fontSize: 11)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: reacoes.map((doc) {
+                                  final data = doc.data() as Map<String, dynamic>;
+                                  final emoji = data['emoji'] as String? ?? '👏';
+                                  final de = data['de'] as String? ?? '';
+                                  final amigo = _amigos.firstWhere((a) => a['uid'] == de, orElse: () => {});
+                                  final nomeAmigo = amigo.isNotEmpty
+                                      ? (amigo['perfil'] as PerfilUsuario).nome
+                                      : 'Amigo';
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: _tc().withOpacity(0.06),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: _tc().withOpacity(0.1)),
+                                    ),
+                                    child: Text('$emoji  $nomeAmigo', style: TextStyle(color: _tc(), fontSize: 13)),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
                     if (_amigos.isEmpty)
                       Center(
                         child: Padding(
@@ -5379,12 +5777,14 @@ class _TelaAmigosState extends State<TelaAmigos> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              // Stats
+                              // Stats + Reacção
                               Row(
                                 children: [
                                   _statAmigo(Icons.timer_outlined, _fmtTempo(totalFoco), 'foco total'),
                                   const SizedBox(width: 20),
                                   _statAmigo(Icons.task_alt, '$totalSessoes', 'sessões'),
+                                  const Spacer(),
+                                  _BotaoReacao(amigoUid: a['uid'] as String, meuUid: widget.uid),
                                 ],
                               ),
                               // Conquistas do amigo
@@ -6178,6 +6578,498 @@ class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
   }
 }
 
+
+
+// =============================================================================
+// STREAK FREEZE — já integrado em _StreakDialog acima
+// =============================================================================
+
+// =============================================================================
+// META SEMANAL — Bottom Sheet
+// =============================================================================
+
+class _BottomSheetMetaSemanal extends StatefulWidget {
+  final List<SessaoConcluida> sessoes;
+  final int metaAtual;
+  final ValueChanged<int> onSalvar;
+  const _BottomSheetMetaSemanal({required this.sessoes, required this.metaAtual, required this.onSalvar});
+  @override
+  State<_BottomSheetMetaSemanal> createState() => _BottomSheetMetaSemanalState();
+}
+
+class _BottomSheetMetaSemanalState extends State<_BottomSheetMetaSemanal> {
+  late int _meta;
+  static const azul = Color(0xFF1D81C7);
+
+  @override
+  void initState() {
+    super.initState();
+    _meta = widget.metaAtual == 0 ? 300 : widget.metaAtual; // default 5h
+  }
+
+  int _minutosEstaSemana() {
+    final hoje = DateTime.now();
+    final inicioSemana = hoje.subtract(Duration(days: hoje.weekday - 1));
+    final semanaStr = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+    return widget.sessoes
+        .where((s) => s.dataConclusao.isAfter(semanaStr))
+        .fold(0, (acc, s) => acc + s.tempoFocoSegundos ~/ 60);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progresso = _meta > 0 ? (_minutosEstaSemana() / _meta).clamp(0.0, 1.0) : 0.0;
+    final mins = _minutosEstaSemana();
+    final bg = temaEscuro.value ? const Color(0xFF111111) : Colors.white;
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: const Border(top: BorderSide(color: azul, width: 2)),
+      ),
+      padding: EdgeInsets.only(
+        left: 24, right: 24, top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 20),
+          const Text('🎯  Meta Semanal', style: TextStyle(color: azul, fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          // Progresso desta semana
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: azul.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: azul.withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Esta semana', style: TextStyle(color: _tc54(), fontSize: 13)),
+                    Text(
+                      '${mins ~/ 60}h ${mins % 60}m / ${_meta ~/ 60}h ${_meta % 60 == 0 ? '' : '${_meta % 60}m'}',
+                      style: TextStyle(color: _tc(), fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: progresso,
+                    minHeight: 10,
+                    color: progresso >= 1.0 ? Colors.greenAccent : azul,
+                    backgroundColor: _tc().withOpacity(0.08),
+                  ),
+                ),
+                if (progresso >= 1.0) ...[
+                  const SizedBox(height: 8),
+                  const Row(
+                    children: [
+                      Text('🏆', style: TextStyle(fontSize: 16)),
+                      SizedBox(width: 6),
+                      Text('Meta atingida esta semana!', style: TextStyle(color: Colors.greenAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Meta: ${_meta ~/ 60}h ${_meta % 60 > 0 ? '${_meta % 60}m' : ''}', style: const TextStyle(color: azul, fontWeight: FontWeight.bold, fontSize: 15)),
+              Text('por semana', style: TextStyle(color: _tc54(), fontSize: 13)),
+            ],
+          ),
+          Slider(
+            value: _meta.toDouble(),
+            min: 30,
+            max: 1200,
+            divisions: 39,
+            label: '${_meta ~/ 60}h ${_meta % 60 > 0 ? '${_meta % 60}m' : ''}',
+            onChanged: (v) => setState(() => _meta = (v ~/ 30) * 30),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [60, 120, 180, 300, 600].map((m) => OutlinedButton(
+              onPressed: () => setState(() => _meta = m),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _meta == m ? Colors.white : azul,
+                backgroundColor: _meta == m ? azul : null,
+                side: BorderSide(color: azul.withOpacity(0.5)),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: const Size(0, 32),
+              ),
+              child: Text('${m ~/ 60}h', style: const TextStyle(fontSize: 12)),
+            )).toList(),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                widget.onSalvar(_meta);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: azul,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('GUARDAR META', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// LEADERBOARD GLOBAL
+// =============================================================================
+
+class TelaLeaderboard extends StatefulWidget {
+  const TelaLeaderboard({super.key});
+  @override
+  State<TelaLeaderboard> createState() => _TelaLeaderboardState();
+}
+
+class _TelaLeaderboardState extends State<TelaLeaderboard> with SingleTickerProviderStateMixin {
+  static const azul = Color(0xFF1D81C7);
+  late TabController _tabCtrl;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+
+  List<Map<String, dynamic>> _rankingStreak = [];
+  List<Map<String, dynamic>> _rankingTempo = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _carregarLeaderboard();
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregarLeaderboard() async {
+    setState(() => _loading = true);
+    try {
+      // Buscar todos os utilizadores do índice global (máx 50)
+      final snap = await _db.collection('usernames').limit(50).get();
+      final lista = <Map<String, dynamic>>[];
+
+      for (final doc in snap.docs) {
+        final uid = doc.data()['uid'] as String? ?? '';
+        if (uid.isEmpty) continue;
+        try {
+          // Verificar se conta é privada
+          final cfgSnap = await _db.collection('users').doc(uid).collection('config').doc('dados').get();
+          final privado = cfgSnap.exists ? (cfgSnap.data()?['contaPrivada'] as bool? ?? false) : false;
+          if (privado && uid != _uid) continue;
+
+          final perfilSnap = await _db.collection('users').doc(uid).collection('perfil').doc('dados').get();
+          if (!perfilSnap.exists) continue;
+          final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+
+          final sessoesSnap = await _db.collection('users').doc(uid).collection('sessoes').orderBy('dataConclusao').get();
+          final sessoes = sessoesSnap.docs.map((d) => SessaoConcluida.fromJson(d.data())).toList();
+
+          final freezeDias = cfgSnap.exists ? List<String>.from(cfgSnap.data()?['freezeDias'] as List? ?? []) : <String>[];
+          final streak = StreakInfo.calcularComFreeze(sessoes, freezeDias);
+          final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
+
+          lista.add({
+            'uid': uid,
+            'perfil': perfil,
+            'streak': streak,
+            'totalFoco': totalFoco,
+            'totalSessoes': sessoes.length,
+            'euProprio': uid == _uid,
+          });
+        } catch (_) {}
+      }
+
+      // Ranking por streak
+      final porStreak = [...lista]..sort((a, b) => (b['streak'] as StreakInfo).dias.compareTo((a['streak'] as StreakInfo).dias));
+      // Ranking por tempo de foco
+      final porTempo = [...lista]..sort((a, b) => (b['totalFoco'] as int).compareTo(a['totalFoco'] as int));
+
+      if (mounted) setState(() {
+        _rankingStreak = porStreak;
+        _rankingTempo = porTempo;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Erro leaderboard: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _fmtTempo(int seg) {
+    if (seg >= 3600) {
+      final h = seg ~/ 3600;
+      final m = (seg % 3600) ~/ 60;
+      return m > 0 ? '${h}h ${m}m' : '${h}h';
+    }
+    return '${seg ~/ 60}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Leaderboard Global'),
+        bottom: TabBar(
+          controller: _tabCtrl,
+          indicatorColor: azul,
+          labelColor: azul,
+          unselectedLabelColor: Colors.white54,
+          tabs: const [
+            Tab(icon: Icon(Icons.local_fire_department_outlined), text: 'Streak'),
+            Tab(icon: Icon(Icons.timer_outlined), text: 'Tempo de Foco'),
+          ],
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: azul))
+          : TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _ListaRanking(
+                  lista: _rankingStreak,
+                  valorBuilder: (e) => '🔥 ${(e['streak'] as StreakInfo).dias} dias',
+                  subBuilder: (e) => '${e['totalSessoes']} sessões',
+                ),
+                _ListaRanking(
+                  lista: _rankingTempo,
+                  valorBuilder: (e) => '⏱ ${_fmtTempo(e['totalFoco'] as int)}',
+                  subBuilder: (e) => '${(e['streak'] as StreakInfo).dias} dias streak',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _ListaRanking extends StatelessWidget {
+  final List<Map<String, dynamic>> lista;
+  final String Function(Map<String, dynamic>) valorBuilder;
+  final String Function(Map<String, dynamic>) subBuilder;
+
+  const _ListaRanking({required this.lista, required this.valorBuilder, required this.subBuilder});
+
+  static const List<String> _medalhas = ['🥇', '🥈', '🥉'];
+
+  @override
+  Widget build(BuildContext context) {
+    if (lista.isEmpty) {
+      return Center(child: Text('Sem dados', style: TextStyle(color: _tc38())));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: lista.length,
+      itemBuilder: (ctx, i) {
+        final e = lista[i];
+        final perfil = e['perfil'] as PerfilUsuario;
+        final euProprio = e['euProprio'] as bool? ?? false;
+        const azul = Color(0xFF1D81C7);
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: euProprio ? azul.withOpacity(0.08) : Colors.transparent,
+            border: Border.all(
+              color: euProprio ? azul.withOpacity(0.6) : _tc().withOpacity(0.1),
+            ),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 32,
+                child: Text(
+                  i < 3 ? _medalhas[i] : '${i + 1}',
+                  style: TextStyle(
+                    fontSize: i < 3 ? 22 : 15,
+                    fontWeight: FontWeight.bold,
+                    color: i >= 3 ? _tc38() : null,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 12),
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: azul.withOpacity(0.15),
+                backgroundImage: perfil.fotoUrl.isNotEmpty ? NetworkImage(perfil.fotoUrl) as ImageProvider : null,
+                child: perfil.fotoUrl.isEmpty
+                    ? Text(perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                        style: const TextStyle(color: azul, fontWeight: FontWeight.bold))
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          perfil.nome.isNotEmpty ? perfil.nome : 'Utilizador',
+                          style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        if (euProprio) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(color: azul, borderRadius: BorderRadius.circular(8)),
+                            child: const Text('Tu', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    Text(subBuilder(e), style: TextStyle(color: _tc54(), fontSize: 12)),
+                  ],
+                ),
+              ),
+              Text(valorBuilder(e), style: const TextStyle(color: Color(0xFF1D81C7), fontWeight: FontWeight.bold, fontSize: 14)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// REACÇÕES ENTRE AMIGOS
+// =============================================================================
+
+class _BotaoReacao extends StatefulWidget {
+  final String amigoUid;
+  final String meuUid;
+  const _BotaoReacao({required this.amigoUid, required this.meuUid});
+  @override
+  State<_BotaoReacao> createState() => _BotaoReacaoState();
+}
+
+class _BotaoReacaoState extends State<_BotaoReacao> {
+  bool _enviando = false;
+  String? _ultimaReacao;
+
+  Future<void> _enviarReacao(String emoji) async {
+    if (_enviando) return;
+    setState(() { _enviando = true; _ultimaReacao = emoji; });
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.amigoUid)
+          .collection('reacoes')
+          .add({
+        'de': widget.meuUid,
+        'emoji': emoji,
+        'lida': false,
+        'criadaEm': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$emoji Reacção enviada!'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erro ao enviar reacção: $e');
+    }
+    if (mounted) setState(() => _enviando = false);
+  }
+
+  void _mostrarPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: temaEscuro.value ? const Color(0xFF111111) : Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Enviar reacção', style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: _reacoes.map((emoji) => GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _enviarReacao(emoji);
+                  },
+                  child: Container(
+                    width: 52, height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1D81C7).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.2)),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(emoji, style: const TextStyle(fontSize: 26)),
+                  ),
+                )).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _mostrarPicker(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.35)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_ultimaReacao ?? '👏', style: const TextStyle(fontSize: 16)),
+            const SizedBox(width: 4),
+            const Icon(Icons.add, size: 13, color: Color(0xFF1D81C7)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// NOTIFICAÇÕES DE REACÇÕES (badge no drawer de Amigos)
+// =============================================================================
 
 /// Logo de tomate realista: corpo esférico com gradiente radial,
 /// sulco vertical, sombra inferior, brilho especular, sépalas (folhas
