@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ────────────────────────────────────────────────────────────────────
+    // Índice global de usernames — permite procurar/validar usernames
+    //   • LEITURA: qualquer utilizador autenticado (para procurar amigos)
+    //   • ESCRITA: só o dono da entrada (uid no documento) pode escrever
+    // ────────────────────────────────────────────────────────────────────
+    match /usernames/{username} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null
+                            && resource.data.uid == request.auth.uid;
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Dados pessoais do utilizador (e subcoleções)
+    //   • Cada utilizador acede APENAS aos seus próprios dados
+    //   • Excepções específicas: perfil, pedidos_amizade e reacoes
+    //     têm regras especiais para suportar a funcionalidade de amigos
+    // ────────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Documento raiz do utilizador
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+
+      // ── PERFIL ────────────────────────────────────────────────────────
+      // O dono lê/escreve sempre. Outros utilizadores autenticados podem
+      // LER o perfil (necessário para ver amigos e resultados de pesquisa).
+      match /perfil/{docId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null
+                     && request.auth.uid == userId;
+      }
+
+      // ── CONFIG (tema, countdown, timer ativo, freezes, meta) ──────────
+      match /config/{docId} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+
+      // ── TAREFAS ───────────────────────────────────────────────────────
+      match /tarefas/{tarefaId} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+
+      // ── SESSÕES CONCLUÍDAS ────────────────────────────────────────────
+      // O dono lê/escreve. Amigos podem LER para feed de actividade.
+      match /sessoes/{sessaoId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null
+                     && request.auth.uid == userId;
+      }
+
+      // ── TO-DO LIST (blocos) ───────────────────────────────────────────
+      match /todo/{blocoId} {
+        allow read, write: if request.auth != null
+                           && request.auth.uid == userId;
+      }
+
+      // ── AMIGOS ────────────────────────────────────────────────────────
+      // O dono gere a sua lista. Qualquer autenticado pode ESCREVER um
+      // novo documento (para confirmar amizade bidirecional).
+      match /amigos/{amigoId} {
+        allow read: if request.auth != null
+                    && request.auth.uid == userId;
+        allow write: if request.auth != null
+                     && (request.auth.uid == userId
+                         || request.auth.uid == amigoId);
+      }
+
+      // ── PEDIDOS DE AMIZADE ────────────────────────────────────────────
+      // O destinatário (userId) lê os pedidos recebidos.
+      // O remetente pode criar um pedido a outro user.
+      match /pedidos_amizade/{pedidoId} {
+        allow read: if request.auth != null
+                    && (request.auth.uid == userId
+                        || request.auth.uid == pedidoId);
+        allow create: if request.auth != null
+                      && request.auth.uid == pedidoId;
+        allow delete: if request.auth != null
+                      && (request.auth.uid == userId
+                          || request.auth.uid == pedidoId);
+        allow update: if request.auth != null
+                      && request.auth.uid == userId;
+      }
+
+      // ── PARTILHAS (resultados/conquistas partilhadas com amigos) ──────
+      // O dono lê/escreve. Amigos autenticados podem LER.
+      match /partilhas/{partilhaId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null
+                     && request.auth.uid == userId;
+      }
+
+      // ── REACÇÕES (emojis em partilhas/sessões dos amigos) ─────────────
+      // Qualquer autenticado pode reagir (criar). Só pode apagar a sua.
+      match /reacoes/{reacaoId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow delete: if request.auth != null
+                      && resource.data.deUid == request.auth.uid;
+      }
+    }
+  }
+}
