@@ -231,6 +231,20 @@ Future<void> main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // ✨ NOVO: Aguardar que o Firebase Auth restaure a sessão
+  // Isto é crítico para persistência de login
+  int retries = 0;
+  while (FirebaseAuth.instance.currentUser == null && retries < 30) {
+    await Future.delayed(const Duration(milliseconds: 100));
+    retries++;
+  }
+  
+  if (FirebaseAuth.instance.currentUser == null) {
+    debugPrint('⚠️ Aviso: Firebase Auth não restaurou a sessão após 3 segundos');
+  } else {
+    debugPrint('✅ Sessão restaurada: ${FirebaseAuth.instance.currentUser!.email}');
+  }
+
   await _inicializarNotificacoes();
 
   // Orientação só faz sentido em mobile
@@ -928,95 +942,183 @@ class _PomodoroAppState extends State<PomodoroApp>
 
   Future<void> _carregarDados() async {
     try {
+      // Verificar se o utilizador está autenticado
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('❌ Erro: Utilizador não autenticado em _carregarDados');
+        if (mounted) {
+          setState(() { _aCarregarDados = false; });
+        }
+        return;
+      }
+
+      debugPrint('📚 Carregando dados para: ${user.email}');
+
       // Config (tema + countdown)
-      final configSnap = await _configDoc.get();
-      if (configSnap.exists) {
-        final d = configSnap.data() as Map<String, dynamic>;
-        if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
-        if (d['countdownAlvo'] != null) {
-          _countdownAlvoGuardado = DateTime.tryParse(d['countdownAlvo'] as String);
+      try {
+        final configSnap = await _configDoc.get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar config');
+          },
+        );
+        if (configSnap.exists) {
+          final d = configSnap.data() as Map<String, dynamic>;
+          if (d['temaEscuro'] != null) temaEscuro.value = d['temaEscuro'] as bool;
+          if (d['countdownAlvo'] != null) {
+            _countdownAlvoGuardado = DateTime.tryParse(d['countdownAlvo'] as String);
+          }
+          if (d['countdownMotivo'] != null) {
+            _countdownMotivoGuardado = d['countdownMotivo'] as String;
+          }
+          if (d['streakFreezes'] != null) {
+            _streakFreezes = d['streakFreezes'] as int? ?? 0;
+          }
+          if (d['metaSemanalMinutos'] != null) {
+            _metaSemanalMinutos = d['metaSemanalMinutos'] as int? ?? 0;
+          }
+          if (d['modoDNDAtivo'] != null) {
+            _modoDNDAtivo = d['modoDNDAtivo'] as bool? ?? false;
+          }
+          if (d['freezeDias'] != null) {
+            _freezeDias = List<String>.from(d['freezeDias'] as List? ?? []);
+          }
         }
-        if (d['countdownMotivo'] != null) {
-          _countdownMotivoGuardado = d['countdownMotivo'] as String;
-        }
-        if (d['streakFreezes'] != null) {
-          _streakFreezes = d['streakFreezes'] as int? ?? 0;
-        }
-        if (d['metaSemanalMinutos'] != null) {
-          _metaSemanalMinutos = d['metaSemanalMinutos'] as int? ?? 0;
-        }
-        if (d['modoDNDAtivo'] != null) {
-          _modoDNDAtivo = d['modoDNDAtivo'] as bool? ?? false;
-        }
-        if (d['freezeDias'] != null) {
-          _freezeDias = List<String>.from(d['freezeDias'] as List? ?? []);
-        }
+        debugPrint('✅ Config carregada');
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar config: $e');
       }
 
       // Perfil
-      final perfilSnap = await _perfilDoc.get();
-      if (perfilSnap.exists) {
-        perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
+      try {
+        final perfilSnap = await _perfilDoc.get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar perfil');
+          },
+        );
+        if (perfilSnap.exists) {
+          perfil = PerfilUsuario.fromJson(perfilSnap.data() as Map<String, dynamic>);
+          debugPrint('✅ Perfil carregado: ${perfil.nomedeutilizador}');
+        } else {
+          debugPrint('⚠️ Documento de perfil não existe');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar perfil: $e');
       }
 
       // Tarefas
-      final tarefasSnap = await _tarefasCol.orderBy('ordem').get();
-      tarefas = tarefasSnap.docs
-          .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
-          .toList();
+      try {
+        final tarefasSnap = await _tarefasCol.orderBy('ordem').get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar tarefas');
+          },
+        );
+        tarefas = tarefasSnap.docs
+            .map((d) => Tarefa.fromJson(d.data() as Map<String, dynamic>))
+            .toList();
+        debugPrint('✅ Tarefas carregadas: ${tarefas.length}');
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar tarefas: $e');
+      }
 
       // Ultima tarefa
-      final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
-      final ultimaId = configData['ultimaTarefaId'] as String?;
-      if (ultimaId != null) {
-        try { ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId); } catch (_) {}
+      try {
+        final configSnap = await _configDoc.get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar ultima tarefa');
+          },
+        );
+        final configData = configSnap.exists ? configSnap.data() as Map<String, dynamic> : {};
+        final ultimaId = configData['ultimaTarefaId'] as String?;
+        if (ultimaId != null) {
+          try { 
+            ultimaTarefa = tarefas.firstWhere((t) => t.id == ultimaId);
+            debugPrint('✅ Última tarefa: ${ultimaTarefa?.nome}');
+          } catch (_) {
+            debugPrint('⚠️ Última tarefa não encontrada');
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar última tarefa: $e');
       }
 
       // Sessões
-      final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get();
-      sessoes = sessoesSnap.docs
-          .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
-          .toList();
-
-      // Todo blocos — lidos em TelaTodo via Firestore diretamente
-      // Guardamos snapshot JSON para passar ao widget
-      final todoSnap = await _todoCol.get();
-      if (todoSnap.docs.isNotEmpty) {
-        final m = <String, dynamic>{};
-        for (final doc in todoSnap.docs) {
-          m[doc.id] = doc.data();
-        }
-        _todoBlocosGuardados = jsonEncode(m);
+      try {
+        final sessoesSnap = await _sessoesCol.orderBy('dataConclusao').get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar sessões');
+          },
+        );
+        sessoes = sessoesSnap.docs
+            .map((d) => SessaoConcluida.fromJson(d.data() as Map<String, dynamic>))
+            .toList();
+        debugPrint('✅ Sessões carregadas: ${sessoes.length}');
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar sessões: $e');
       }
 
-      // Restaurar timer que estava a correr (mesmo noutro dispositivo)
-      if (configSnap.exists) {
-        try {
-          await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
-        } catch (e) {
-          debugPrint('Erro ao restaurar timer: $e');
+      // Todo blocos
+      try {
+        final todoSnap = await _todoCol.get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao carregar TODO');
+          },
+        );
+        if (todoSnap.docs.isNotEmpty) {
+          final m = <String, dynamic>{};
+          for (final doc in todoSnap.docs) {
+            m[doc.id] = doc.data();
+          }
+          _todoBlocosGuardados = jsonEncode(m);
+          debugPrint('✅ TODO blocos carregados: ${todoSnap.docs.length}');
         }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao carregar TODO: $e');
+      }
+
+      // Restaurar timer que estava a correr
+      try {
+        final configSnap = await _configDoc.get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Timeout ao restaurar timer');
+          },
+        );
+        if (configSnap.exists) {
+          await _restaurarTimerSeAtivo(configSnap.data() as Map<String, dynamic>);
+          debugPrint('✅ Timer restaurado');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Erro ao restaurar timer: $e');
       }
       
       // Agendar notificação diária
       try {
         await _agendarNotificacaoDiaria();
+        debugPrint('✅ Notificação agendada');
       } catch (e) {
-        debugPrint('Erro ao agendar notificação diária: $e');
+        debugPrint('⚠️ Erro ao agendar notificação: $e');
       }
       
       // Migração: garantir que o username do utilizador está no índice global
       try {
         await _migrarUsernameParaIndice();
+        debugPrint('✅ Username migrado');
       } catch (e) {
-        debugPrint('Erro ao migrar username para índice: $e');
+        debugPrint('⚠️ Erro ao migrar username: $e');
       }
       
+      debugPrint('✅ Todos os dados carregados com sucesso');
       if (mounted) {
         setState(() { _aCarregarDados = false; });
       }
     } catch (e) {
-      debugPrint('Erro ao carregar dados do Firestore: $e');
+      debugPrint('❌ Erro geral ao carregar dados: $e');
       if (mounted) setState(() { _aCarregarDados = false; });
     }
   }
