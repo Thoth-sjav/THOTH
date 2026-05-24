@@ -22,6 +22,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:window_manager/window_manager.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import 'firebase_options.dart';
 
@@ -35,6 +36,7 @@ final FlutterLocalNotificationsPlugin _notifPlugin =
 
 // Mensagens passivo-agressivas estilo Duolingo
 final List<String> _mensagensNotif = [
+  // Clássicos passivo-agressivos
   'Já estudaste hoje? Não? Tá bem... o teu futuro self que se desenrasque.',
   'O teu rival já estudou 2h hoje. Tu não. Parabéns.',
   'Lembras-te dos teus sonhos? O THOTH também. Vai estudar.',
@@ -45,6 +47,22 @@ final List<String> _mensagensNotif = [
   'A tua mãe perguntou como vai o estudo. Não respondas.',
   'Esta notificação é mais produtiva do que tu hoje. Triste.',
   'Foste a algum lado menos estudar. Parabéns pela criatividade.',
+  // Novos — mais engraçados e duolingo-ish
+  'Os neurónios estão à espera. Não os faças esperar mais.',
+  'Estudar 20 minutos > não estudar nada. Matemática difícil, eu sei.',
+  'O teu streak vai morrer hoje. Mas tu continuas aqui. A ler notificações.',
+  'Esta é a tua consciência. Abre o THOTH. Por favor.',
+  'Um PhD começa com uma sessão de estudo. Esta. Agora.',
+  'Fact: ninguém foi a lado nenhum sem estudar. Mas ok, continua a scrollar.',
+  'Já passaste 5 minutos a ler isto. Podias ter estudado.',
+  'O THOTH não te julga. Mas eu sim. Vai estudar.',
+  'Duolingo tem uma coruja. O THOTH tem uma notificação. Ambos te odeiam.',
+  'Hoje ainda dá tempo. Amanhã tu dizes o mesmo. Entra no ciclo.',
+  'Uma sessão de 25 minutos. É só isso. Consegues fazer isso num intervalo.',
+  'O teu cérebro quer aprender. O teu telemóvel não deixa. Mostra quem manda.',
+  'Sem pressão, mas... os teus objetivos não vão alcançar-se sozinhos. 😇',
+  'Boa notícia: ainda há tempo. Má notícia: estás a usá-lo mal.',
+  'Estudo pendente: SIM. Desculpas prontas: também SIM. Abre o app.',
 ];
 
 Future<void> _inicializarNotificacoes() async {
@@ -69,8 +87,11 @@ Future<void> _inicializarNotificacoes() async {
   );
 }
 
+/// Agenda uma notificação diária às 20h, MAS só a mostra se o utilizador
+/// ainda não tiver estudado hoje. Usa um canal de alta prioridade para
+/// aparecer mesmo com a app fechada (Android 8+, iOS com permissão).
 Future<void> _agendarNotificacaoDiaria() async {
-  // Notificações agendadas não suportadas em Windows/Linux via este plugin
+  // Windows/Linux não suportam notificações nativas via este plugin
   if (_isDesktop && !Platform.isMacOS) return;
 
   await _notifPlugin.cancelAll();
@@ -85,26 +106,53 @@ Future<void> _agendarNotificacaoDiaria() async {
     agendado = agendado.add(const Duration(days: 1));
   }
 
+  const androidDetails = AndroidNotificationDetails(
+    'thoth_daily',
+    'Lembrete Diário',
+    channelDescription: 'Lembrete passivo-agressivo para estudar',
+    importance: Importance.max,           // heads-up mesmo com app fechada
+    priority: Priority.max,
+    ticker: 'Vai estudar.',
+    playSound: true,
+    enableVibration: true,
+    styleInformation: BigTextStyleInformation(''),
+  );
+  const iosDetails = DarwinNotificationDetails(
+    presentAlert: true,
+    presentBadge: true,
+    presentSound: true,
+  );
+
   await _notifPlugin.zonedSchedule(
     0,
     'Thoth está à tua espera 📚',
     msg,
     agendado,
-    const NotificationDetails(
-      android: AndroidNotificationDetails(
-        'thoth_daily',
-        'Estudo Diário',
-        channelDescription: 'Lembrete diário para estudar',
-        importance: Importance.high,
-        priority: Priority.high,
-      ),
-      iOS: DarwinNotificationDetails(),
-    ),
-    androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    const NotificationDetails(android: androidDetails, iOS: iosDetails, macOS: iosDetails),
+    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     uiLocalNotificationDateInterpretation:
         UILocalNotificationDateInterpretation.absoluteTime,
-    matchDateTimeComponents: DateTimeComponents.time,
+    matchDateTimeComponents: DateTimeComponents.time,   // repete diariamente
   );
+}
+
+/// Verifica se o utilizador já estudou hoje e, se sim, cancela a notificação agendada.
+/// Deve ser chamado quando uma sessão é concluída.
+Future<void> _cancelarNotifSeEstudouHoje(String uid) async {
+  try {
+    final hoje = DateTime.now();
+    final inicioDia = DateTime(hoje.year, hoje.month, hoje.day);
+    final snap = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('sessoes')
+        .where('dataConclusao', isGreaterThanOrEqualTo: inicioDia.toIso8601String())
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      await _notifPlugin.cancel(0);  // cancela a notificação das 20h
+    }
+  } catch (_) {}
 }
 
 Future<void> main() async {
@@ -901,6 +949,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void dispose() {
     _timer?.cancel();
+    _audioPlayer.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -1005,11 +1054,21 @@ class _PomodoroAppState extends State<PomodoroApp>
     return global.clamp(0.0, 1.0);
   }
 
+  // ── Audio player para sons do timer ─────────────────────────────────────
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
   void _tocarSom({bool fim = false}) {
     try {
       HapticFeedback.mediumImpact();
+      // Som real: fim de sessão usa som mais dramático, troca de fase usa som suave
+      final asset = fim ? 'sounds/timer_fim.wav' : 'sounds/timer_fase.wav';
+      _audioPlayer.play(AssetSource(asset)).catchError((_) {
+        // fallback silencioso se o asset não existir
+        SystemSound.play(SystemSoundType.click);
+      });
+    } catch (_) {
       SystemSound.play(SystemSoundType.click);
-    } catch (_) {}
+    }
   }
 
   void _avancarFase() {
@@ -1086,7 +1145,12 @@ class _PomodoroAppState extends State<PomodoroApp>
     }
     setState(() => estadoApp = EstadoApp.fim);
     _guardarTudo();
-    if (sessoes.isNotEmpty) _guardarSessao(sessoes.last);
+    if (sessoes.isNotEmpty) {
+      _guardarSessao(sessoes.last);
+      // Se estudou hoje, cancela a notificação das 20h
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) _cancelarNotifSeEstudouHoje(uid);
+    }
     // Limpar estado do timer no Firestore
     _configDoc.set({
       'timerAtivo': false,
@@ -1306,14 +1370,25 @@ class _MenuLateral extends StatelessWidget {
               );
             },
           ),
-          _drawerItem(
-            icon: Icons.group_outlined,
-            label: 'Amigos',
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('pedidos_amizade')
+                .where('para', isEqualTo: FirebaseAuth.instance.currentUser!.uid)
+                .where('estado', isEqualTo: 'pendente')
+                .snapshots(),
+            builder: (ctx, snap) {
+              final count = snap.data?.docs.length ?? 0;
+              return _drawerItem(
+                icon: Icons.group_outlined,
+                label: 'Amigos',
+                badge: count,
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
+                  );
+                },
               );
             },
           ),
@@ -1358,9 +1433,15 @@ class _MenuLateral extends StatelessWidget {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    int badge = 0,
   }) {
     return ListTile(
-      leading: Icon(icon, color: Colors.white),
+      leading: badge > 0
+          ? Badge(
+              label: Text('$badge', style: const TextStyle(fontSize: 10)),
+              child: Icon(icon, color: Colors.white),
+            )
+          : Icon(icon, color: Colors.white),
       title: Text(label, style: TextStyle(color: _tc())),
       onTap: onTap,
     );
@@ -3063,10 +3144,10 @@ class _TelaPerfilState extends State<TelaPerfil> {
               OutlinedButton.icon(
                 onPressed: () {
                   final username = widget.perfil.nomedeutilizador;
-                  final link = 'https://thoth.app/perfil/@$username';
+                  Clipboard.setData(ClipboardData(text: '@$username'));
                   Share.share(
-                    '✨ Segue o meu perfil no Thoth!\n$link\n\n'
-                    'Pesquisa por @$username para me adicionares como amigo.',
+                    'Segue o meu progresso no Thoth! 📚\n'
+                    'Pesquisa por @$username na aba de Amigos para me adicionares.',
                     subject: 'O meu perfil Thoth — @$username',
                   );
                 },
@@ -4728,20 +4809,50 @@ class _TelaAmigosState extends State<TelaAmigos> {
   final TextEditingController _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _resultados = [];
   bool _searching = false;
+  StreamSubscription<QuerySnapshot>? _pedidosSub;
 
   @override
   void initState() {
     super.initState();
-    _carregar();
+    _carregarAmigos();
+    // Stream real-time para pedidos pendentes
+    _pedidosSub = _db
+        .collection('pedidos_amizade')
+        .where('para', isEqualTo: widget.uid)
+        .where('estado', isEqualTo: 'pendente')
+        .snapshots()
+        .listen((snap) async {
+      final pedidos = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final remetenteUid = doc.data()['de'] as String? ?? '';
+        if (remetenteUid.isEmpty) continue;
+        try {
+          final perfilSnap = await _db
+              .collection('users')
+              .doc(remetenteUid)
+              .collection('perfil')
+              .doc('dados')
+              .get();
+          final perfil = perfilSnap.exists
+              ? PerfilUsuario.fromJson(perfilSnap.data()!)
+              : PerfilUsuario();
+          pedidos.add({'uid': remetenteUid, 'perfil': perfil, 'docId': doc.id});
+        } catch (_) {}
+      }
+      if (mounted) setState(() => _pedidos = pedidos);
+    });
   }
 
   @override
   void dispose() {
+    _pedidosSub?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _carregar() async {
+  Future<void> _carregar() => _carregarAmigos();
+
+  Future<void> _carregarAmigos() async {
     setState(() => _loading = true);
     try {
       // Amigos aceites — lidos da subcoleção do próprio utilizador
@@ -4784,36 +4895,12 @@ class _TelaAmigosState extends State<TelaAmigos> {
         });
       }
 
-      // Pedidos pendentes recebidos — lidos da coleção global
-      final pedidosSnap = await _db
-          .collection('pedidos_amizade')
-          .where('para', isEqualTo: widget.uid)
-          .where('estado', isEqualTo: 'pendente')
-          .get();
-
-      final pedidos = <Map<String, dynamic>>[];
-      for (final doc in pedidosSnap.docs) {
-        final remetenteUid = doc.data()['de'] as String? ?? '';
-        if (remetenteUid.isEmpty) continue;
-        final perfilSnap = await _db
-            .collection('users')
-            .doc(remetenteUid)
-            .collection('perfil')
-            .doc('dados')
-            .get();
-        final perfil = perfilSnap.exists
-            ? PerfilUsuario.fromJson(perfilSnap.data()!)
-            : PerfilUsuario();
-        pedidos.add({'uid': remetenteUid, 'perfil': perfil, 'docId': doc.id});
-      }
-
-      if (mounted) setState(() { _amigos = amigos; _pedidos = pedidos; _loading = false; });
+      if (mounted) setState(() { _amigos = amigos; _loading = false; });
     } catch (e) {
       debugPrint('Erro ao carregar amigos: $e');
       if (mounted) setState(() => _loading = false);
     }
   }
-
   Future<void> _pesquisar(String query) async {
     if (query.trim().isEmpty) { setState(() => _resultados = []); return; }
     setState(() => _searching = true);
@@ -5002,10 +5089,13 @@ class _TelaAmigosState extends State<TelaAmigos> {
                           padding: const EdgeInsets.only(top: 10),
                           child: OutlinedButton.icon(
                             onPressed: () {
-                              final link = 'https://thoth.app/perfil/@${perfil.nomedeutilizador}';
+                              // Copia o username para a área de transferência
+                              Clipboard.setData(ClipboardData(
+                                text: '@${perfil.nomedeutilizador}',
+                              ));
                               Share.share(
-                                '✨ Adiciona-me no Thoth!\n$link\n\n'
-                                'Ou pesquisa por @${perfil.nomedeutilizador} na aba de Amigos.',
+                                'Adiciona-me no Thoth! 📚\n'
+                                'Pesquisa por @${perfil.nomedeutilizador} na aba de Amigos.',
                                 subject: 'O meu perfil no Thoth',
                               );
                             },
@@ -5016,7 +5106,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             icon: const Icon(Icons.ios_share_rounded, size: 16),
-                            label: Text('Partilhar o meu perfil  @${perfil.nomedeutilizador}'),
+                            label: Text('Partilhar  @${perfil.nomedeutilizador}'),
                           ),
                         );
                       },
