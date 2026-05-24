@@ -23,6 +23,7 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:window_manager/window_manager.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'firebase_options.dart';
 
@@ -166,6 +167,61 @@ Future<void> _cancelarNotifSeEstudouHoje(String uid) async {
       await _notifPlugin.cancel(0);  // cancela a notificação das 20h
     }
   } catch (_) {}
+}
+
+/// ─── Serviço de Persistência de Sessão ──────────────────────────────────────
+class SessionPersistenceService {
+  static const String _userIdKey = 'thoth_user_id';
+  static const String _loginTimestampKey = 'thoth_login_timestamp';
+  static const String _isLoggedInKey = 'thoth_is_logged_in';
+
+  /// Salva a sessão quando o utilizador faz login
+  static Future<void> saveSession(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_userIdKey, userId);
+      await prefs.setBool(_isLoggedInKey, true);
+      await prefs.setInt(_loginTimestampKey, DateTime.now().millisecondsSinceEpoch);
+      debugPrint('✅ Sessão guardada para: $userId');
+    } catch (e) {
+      debugPrint('❌ Erro ao guardar sessão: $e');
+    }
+  }
+
+  /// Obtém o ID do utilizador guardado
+  static Future<String?> getSavedUserId() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_userIdKey);
+    } catch (e) {
+      debugPrint('❌ Erro ao obter utilizador guardado: $e');
+      return null;
+    }
+  }
+
+  /// Verifica se há uma sessão ativa
+  static Future<bool> hasActiveSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_isLoggedInKey) ?? false;
+    } catch (e) {
+      debugPrint('❌ Erro ao verificar sessão: $e');
+      return false;
+    }
+  }
+
+  /// Limpa a sessão quando o utilizador faz logout
+  static Future<void> clearSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_userIdKey);
+      await prefs.remove(_isLoggedInKey);
+      await prefs.remove(_loginTimestampKey);
+      debugPrint('✅ Sessão limpa');
+    } catch (e) {
+      debugPrint('❌ Erro ao limpar sessão: $e');
+    }
+  }
 }
 
 Future<void> main() async {
@@ -607,7 +663,13 @@ class _LoginPageState extends State<LoginPage> {
         idToken: googleAuth.idToken,
       );
 
-      await FirebaseAuth.instance.signInWithCredential(credential);
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      
+      // ✨ NOVO: Guardar a sessão após login bem-sucedido
+      if (userCredential.user != null) {
+        await SessionPersistenceService.saveSession(userCredential.user!.uid);
+        debugPrint('✅ Login bem-sucedido para ${userCredential.user!.email}');
+      }
       // AuthGate deteta a mudança automaticamente
     } catch (e) {
       debugPrint('Erro no login: $e');
@@ -4906,6 +4968,9 @@ class _TelaDefinicoesState extends State<TelaDefinicoes> {
   await GoogleSignIn().signOut();
 
   await FirebaseAuth.instance.signOut();
+
+  // ✨ NOVO: Limpar a sessão guardada
+  await SessionPersistenceService.clearSession();
 
   if (context.mounted) {
     Navigator.pop(ctx);
