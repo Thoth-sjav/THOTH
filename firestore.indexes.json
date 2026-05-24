@@ -2,18 +2,157 @@
   "indexes": [
     {
       "collectionGroup": "tarefas",
-      "queryScope": "COLLECTION",
+      "queryScope": "Collection",
       "fields": [
-        { "fieldPath": "ordem", "order": "ASCENDING" }
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataCriacao",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
-      "collectionGroup": "sessoes",
-      "queryScope": "COLLECTION",
+      "collectionGroup": "tarefas",
+      "queryScope": "Collection",
       "fields": [
-        { "fieldPath": "dataConclusao", "order": "ASCENDING" }
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataCriacao",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tarefas",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "materia",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataCriacao",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "tarefas",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "prioridade",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "dataCriacao",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "todo_items",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "bloco",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "indice",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sessoes_concluidas",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataConclusao",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sessoes_concluidas",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataConclusao",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "sessoes_concluidas",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "userUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tarefaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dataConclusao",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "utilizadores",
+      "fieldPath": "username",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "Collection"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "utilizadores",
+      "fieldPath": "email",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "Collection"
+        }
+      ]
+    }
+  ]
 }
