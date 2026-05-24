@@ -1493,13 +1493,16 @@ class _MenuLateral extends StatelessWidget {
                     icon: Icons.group_outlined,
                     label: 'Amigos',
                     badge: count,
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => TelaAmigos(uid: FirebaseAuth.instance.currentUser!.uid)),
+                      );
+                    },
                   );
-                });
+                },
+              );
             },
           ),
           _drawerItem(
@@ -1533,7 +1536,6 @@ class _MenuLateral extends StatelessWidget {
           ),
           _drawerItem(
             icon: Icons.task_alt,
-            label: 'Tarefas Concluídas',
             label: 'Tarefas Concluídas',
             onTap: () {
               Navigator.pop(context);
