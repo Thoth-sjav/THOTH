@@ -1026,19 +1026,26 @@ class _PomodoroAppState extends State<PomodoroApp>
   }
 
   @override
+  late final VoidCallback _temaListener;
+
+  @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _carregarDados();
-    // Guardar quando o tema muda
-    temaEscuro.addListener(() {
-      _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
-    });
+    // Guardar quando o tema muda — guardar referência para remover no dispose
+    _temaListener = () {
+      if (mounted) {
+        _configDoc.set({'temaEscuro': temaEscuro.value}, SetOptions(merge: true));
+      }
+    };
+    temaEscuro.addListener(_temaListener);
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    temaEscuro.removeListener(_temaListener);
     // Guardar estado de forma não-bloqueante (fire-and-forget)
     // Não usar await aqui — dispose() é síncrono
     _salvarEstadoAtual();
