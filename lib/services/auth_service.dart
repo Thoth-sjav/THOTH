@@ -4,20 +4,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  /// LOGIN GOOGLE (ESTÁVEL)
   Future<User?> signInWithGoogle() async {
-    final GoogleSignInAccount? googleUser =
-        await _googleSignIn.signIn();
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) return null;
 
-    if (googleUser == null) {
-      return null;
-    }
-
-    final GoogleSignInAuthentication googleAuth =
-        await googleUser.authentication;
+    final googleAuth = await googleUser.authentication;
 
     final credential = GoogleAuthProvider.credential(
       accessToken: googleAuth.accessToken,
@@ -36,10 +29,8 @@ class AuthService {
     return user;
   }
 
-  /// CRIAR PERFIL FIRESTORE
   Future<void> _createUserIfNotExists(User user) async {
-    final ref =
-        _firestore.collection('utilizadores').doc(user.uid);
+    final ref = _db.collection('users').doc(user.uid);
 
     final doc = await ref.get();
 
@@ -47,7 +38,7 @@ class AuthService {
       await ref.set({
         'uid': user.uid,
         'email': user.email ?? '',
-        'name': user.displayName ?? '',
+        'nome': user.displayName ?? '',
         'photoURL': user.photoURL ?? '',
         'createdAt': FieldValue.serverTimestamp(),
         'settings': {
@@ -58,13 +49,12 @@ class AuthService {
         'stats': {
           'xp': 0,
           'level': 1,
-          'tasks': 0,
         }
       });
     } else {
       await ref.set({
         'email': user.email ?? '',
-        'name': user.displayName ?? '',
+        'nome': user.displayName ?? '',
         'photoURL': user.photoURL ?? '',
       }, SetOptions(merge: true));
     }
@@ -72,8 +62,6 @@ class AuthService {
 
   Future<void> signOut() async {
     await _auth.signOut();
-    await _googleSignIn.signOut();
+    await GoogleSignIn().signOut();
   }
-
-  User? get currentUser => _auth.currentUser;
 }
