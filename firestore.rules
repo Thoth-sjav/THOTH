@@ -6,11 +6,36 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    match /users/{uid} {
-
-      allow read, write: if isAuth() && request.auth.uid == uid;
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
     }
 
+    // Documento raiz do utilizador
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // Todas as subcoleções (config, perfil, tarefas, sessoes, todo, etc.)
+      match /{subcollection}/{docId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Coleção de usernames (para verificar unicidade)
+    match /usernames/{username} {
+      allow read: if isAuth();
+      allow write: if isAuth() && request.resource.data.uid == request.auth.uid;
+    }
+
+    // Pedidos de amizade
+    match /pedidos_amizade/{pedidoId} {
+      allow read: if isAuth() &&
+        (resource.data.de == request.auth.uid || resource.data.para == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.de == request.auth.uid;
+      allow update, delete: if isAuth() &&
+        (resource.data.de == request.auth.uid || resource.data.para == request.auth.uid);
+    }
+
+    // Bloquear tudo o resto
     match /{document=**} {
       allow read, write: if false;
     }
