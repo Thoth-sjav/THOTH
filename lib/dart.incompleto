@@ -6501,62 +6501,57 @@ class _MiniPreview extends StatelessWidget {
 // =============================================================================
 // TELA AMIGOS
 // =============================================================================
-
 class TelaAmigos extends StatefulWidget {
   final String uid;
   const TelaAmigos({super.key, required this.uid});
 
   @override
-  State<TelaAmigos> createState() =>
-      _TelaAmigosState();
+  State<TelaAmigos> createState() => _TelaAmigosState();
 }
 
 class _TelaAmigosState extends State<TelaAmigos> {
   static const azul = Color(0xFF1D81C7);
-  final FirebaseFirestore _db =
-      FirebaseFirestore.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   List<Map<String, dynamic>> _amigos = [];
   List<Map<String, dynamic>> _pedidos = [];
-  Set<String> _pedidosEnviados = {};
+  Set<String> _pedidosEnviados = {}; // UIDs para quem já enviei pedido pendente
   bool _loading = true;
-  final TextEditingController _searchCtrl =
-      TextEditingController();
+  final TextEditingController _searchCtrl = TextEditingController();
   List<Map<String, dynamic>> _resultados = [];
   bool _searching = false;
   StreamSubscription<QuerySnapshot>? _pedidosSub;
-  StreamSubscription<QuerySnapshot>?
-      _pedidosEnviadosSub;
+  StreamSubscription<QuerySnapshot>? _pedidosEnviadosSub;
 
   @override
   void initState() {
     super.initState();
     _carregarAmigos();
 
+    // Stream real-time para pedidos ENVIADOS pelo utilizador
     _pedidosEnviadosSub = _db
         .collection('pedidos_amizade')
         .where('de', isEqualTo: widget.uid)
         .snapshots()
         .listen((snap) {
       final enviados = snap.docs
-          .where((d) =>
-              (d.data()['estado'] as String? ?? '') ==
-              'pendente')
-          .map((d) =>
-              d.data()['para'] as String? ?? '')
+          .where((d) => (d.data()['estado'] as String? ?? '') == 'pendente')
+          .map((d) => d.data()['para'] as String? ?? '')
           .where((uid) => uid.isNotEmpty)
           .toSet();
       if (mounted) {
         setState(() {
           _pedidosEnviados = enviados;
+          // Actualizar resultados de pesquisa visíveis
           for (final r in _resultados) {
-            r['jaPedido'] = enviados
-                .contains(r['uid'] as String? ?? '');
+            r['jaPedido'] = enviados.contains(r['uid'] as String? ?? '');
           }
         });
       }
     });
 
+    // Stream real-time para pedidos pendentes
+    // Filtra só por 'para' para não precisar de índice composto no Firestore
     _pedidosSub = _db
         .collection('pedidos_amizade')
         .where('para', isEqualTo: widget.uid)
@@ -6564,11 +6559,10 @@ class _TelaAmigosState extends State<TelaAmigos> {
         .listen((snap) async {
       final pedidos = <Map<String, dynamic>>[];
       for (final doc in snap.docs) {
-        final estado =
-            doc.data()['estado'] as String? ?? '';
+        // Filtrar pendentes em código (evita índice composto)
+        final estado = doc.data()['estado'] as String? ?? '';
         if (estado != 'pendente') continue;
-        final remetenteUid =
-            doc.data()['de'] as String? ?? '';
+        final remetenteUid = doc.data()['de'] as String? ?? '';
         if (remetenteUid.isEmpty) continue;
         try {
           final perfilSnap = await _db
@@ -6578,14 +6572,9 @@ class _TelaAmigosState extends State<TelaAmigos> {
               .doc('dados')
               .get();
           final perfil = perfilSnap.exists
-              ? PerfilUsuario.fromJson(
-                  perfilSnap.data()!)
+              ? PerfilUsuario.fromJson(perfilSnap.data()!)
               : PerfilUsuario();
-          pedidos.add({
-            'uid': remetenteUid,
-            'perfil': perfil,
-            'docId': doc.id
-          });
+          pedidos.add({'uid': remetenteUid, 'perfil': perfil, 'docId': doc.id});
         } catch (_) {}
       }
       if (mounted) setState(() => _pedidos = pedidos);
@@ -6605,6 +6594,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
   Future<void> _carregarAmigos() async {
     setState(() => _loading = true);
     try {
+      // Amigos aceites — lidos da subcoleção do próprio utilizador
       final amigosSnap = await _db
           .collection('users')
           .doc(widget.uid)
@@ -6628,17 +6618,12 @@ class _TelaAmigosState extends State<TelaAmigos> {
             .orderBy('dataConclusao')
             .get();
         final sessoes = sessoesSnap.docs
-            .map((d) => SessaoConcluida.fromJson(
-                d.data()))
+            .map((d) => SessaoConcluida.fromJson(d.data()))
             .toList();
-        final streak =
-            StreakInfo.calcular(sessoes);
-        final totalFoco = sessoes.fold<int>(
-            0,
-            (s, e) => s + e.tempoFocoSegundos);
+        final streak = StreakInfo.calcular(sessoes);
+        final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
         final perfil = perfilSnap.exists
-            ? PerfilUsuario.fromJson(
-                perfilSnap.data()!)
+            ? PerfilUsuario.fromJson(perfilSnap.data()!)
             : PerfilUsuario();
         amigos.add({
           'uid': amigoUid,
@@ -6649,109 +6634,56 @@ class _TelaAmigosState extends State<TelaAmigos> {
         });
       }
 
-      if (mounted)
-        setState(() {
-          _amigos = amigos;
-          _loading = false;
-        });
+      if (mounted) setState(() { _amigos = amigos; _loading = false; });
     } catch (e) {
       debugPrint('Erro ao carregar amigos: $e');
       if (mounted) setState(() => _loading = false);
     }
   }
-
   Future<void> _pesquisar(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() => _resultados = []);
-      return;
-    }
+    if (query.trim().isEmpty) { setState(() => _resultados = []); return; }
     setState(() => _searching = true);
     try {
-      final q = query
-          .trim()
-          .toLowerCase()
-          .replaceFirst(RegExp(r'^@'), '');
+      final q = query.trim().toLowerCase().replaceFirst(RegExp(r'^@'), '');
       final results = <Map<String, dynamic>>[];
 
-      final usernameDoc = await _db
-          .collection('usernames')
-          .doc(q)
-          .get();
+      // 1. Pesquisa exacta por @username no índice global
+      final usernameDoc = await _db.collection('usernames').doc(q).get();
       if (usernameDoc.exists) {
-        final uid =
-            usernameDoc.data()!['uid'] as String? ??
-                '';
+        final uid = usernameDoc.data()!['uid'] as String? ?? '';
         if (uid.isNotEmpty && uid != widget.uid) {
           final perfilSnap = await _db
-              .collection('users')
-              .doc(uid)
-              .collection('perfil')
-              .doc('dados')
-              .get();
+              .collection('users').doc(uid).collection('perfil').doc('dados').get();
           if (perfilSnap.exists) {
-            final perfil = PerfilUsuario.fromJson(
-                perfilSnap.data()!);
-            final jaAmigo =
-                _amigos.any((a) => a['uid'] == uid);
-            final jaPedido =
-                _pedidosEnviados.contains(uid);
-            results.add({
-              'uid': uid,
-              'perfil': perfil,
-              'jaAmigo': jaAmigo,
-              'jaPedido': jaPedido
-            });
+            final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+            final jaAmigo = _amigos.any((a) => a['uid'] == uid);
+            final jaPedido = _pedidosEnviados.contains(uid);
+            results.add({'uid': uid, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
           }
         }
       }
 
+      // 2. Pesquisa parcial por nome/username — sem orderBy, não precisa de índice
       if (q.length >= 2) {
-        final snap =
-            await _db.collection('usernames').get();
+        final snap = await _db.collection('usernames').get();
         for (final doc in snap.docs) {
-          final uid =
-              doc.data()['uid'] as String? ?? '';
-          if (uid.isEmpty || uid == widget.uid)
-            continue;
-          if (results.any((r) => r['uid'] == uid))
-            continue;
-          final nome = (doc.data()['nome'] as String? ??
-                  '')
-              .toLowerCase();
-          final username =
-              (doc.data()['nomedeutilizador']
-                          as String? ??
-                      '')
-                  .toLowerCase();
-          if (!nome.contains(q) &&
-              !username.contains(q)) continue;
+          final uid = doc.data()['uid'] as String? ?? '';
+          if (uid.isEmpty || uid == widget.uid) continue;
+          if (results.any((r) => r['uid'] == uid)) continue;
+          final nome = (doc.data()['nome'] as String? ?? '').toLowerCase();
+          final username = (doc.data()['nomedeutilizador'] as String? ?? '').toLowerCase();
+          if (!nome.contains(q) && !username.contains(q)) continue;
           final perfilSnap = await _db
-              .collection('users')
-              .doc(uid)
-              .collection('perfil')
-              .doc('dados')
-              .get();
+              .collection('users').doc(uid).collection('perfil').doc('dados').get();
           if (!perfilSnap.exists) continue;
-          final perfil = PerfilUsuario.fromJson(
-              perfilSnap.data()!);
-          final jaAmigo =
-              _amigos.any((a) => a['uid'] == uid);
-          final jaPedido =
-              _pedidosEnviados.contains(uid);
-          results.add({
-            'uid': uid,
-            'perfil': perfil,
-            'jaAmigo': jaAmigo,
-            'jaPedido': jaPedido
-          });
+          final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+          final jaAmigo = _amigos.any((a) => a['uid'] == uid);
+          final jaPedido = _pedidosEnviados.contains(uid);
+          results.add({'uid': uid, 'perfil': perfil, 'jaAmigo': jaAmigo, 'jaPedido': jaPedido});
         }
       }
 
-      if (mounted)
-        setState(() {
-          _resultados = results;
-          _searching = false;
-        });
+      if (mounted) setState(() { _resultados = results; _searching = false; });
     } catch (e) {
       debugPrint('Erro na pesquisa: $e');
       if (mounted) setState(() => _searching = false);
@@ -6760,6 +6692,7 @@ class _TelaAmigosState extends State<TelaAmigos> {
 
   Future<void> _enviarPedido(String amigoUid) async {
     try {
+      // Escreve na coleção global — qualquer utilizador autenticado pode escrever
       await _db.collection('pedidos_amizade').add({
         'de': widget.uid,
         'para': amigoUid,
@@ -6768,14 +6701,11 @@ class _TelaAmigosState extends State<TelaAmigos> {
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Pedido de amizade enviado!')),
+          const SnackBar(content: Text('Pedido de amizade enviado!')),
         );
         setState(() {
           for (final r in _resultados) {
-            if (r['uid'] == amigoUid)
-              r['jaPedido'] = true;
+            if (r['uid'] == amigoUid) r['jaPedido'] = true;
           }
         });
       }
@@ -6783,37 +6713,27 @@ class _TelaAmigosState extends State<TelaAmigos> {
       debugPrint('Erro ao enviar pedido: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Erro ao enviar pedido. Tenta novamente.'),
+          const SnackBar(content: Text('Erro ao enviar pedido. Tenta novamente.'),
               backgroundColor: Colors.redAccent),
         );
       }
     }
   }
 
-  Future<void> _aceitarPedido(
-      String remetenteUid, String docId) async {
+  Future<void> _aceitarPedido(String remetenteUid, String docId) async {
     try {
       final batch = _db.batch();
+      // Marca amizade nos dois perfis
       batch.set(
-        _db
-            .collection('users')
-            .doc(widget.uid)
-            .collection('amigos')
-            .doc(remetenteUid),
+        _db.collection('users').doc(widget.uid).collection('amigos').doc(remetenteUid),
         {'estado': 'aceite'},
       );
       batch.set(
-        _db
-            .collection('users')
-            .doc(remetenteUid)
-            .collection('amigos')
-            .doc(widget.uid),
+        _db.collection('users').doc(remetenteUid).collection('amigos').doc(widget.uid),
         {'estado': 'aceite'},
       );
-      batch.delete(
-          _db.collection('pedidos_amizade').doc(docId));
+      // Apaga o pedido da coleção global
+      batch.delete(_db.collection('pedidos_amizade').doc(docId));
       await batch.commit();
       _carregar();
     } catch (e) {
@@ -6821,13 +6741,9 @@ class _TelaAmigosState extends State<TelaAmigos> {
     }
   }
 
-  Future<void> _recusarPedido(
-      String remetenteUid, String docId) async {
+  Future<void> _recusarPedido(String remetenteUid, String docId) async {
     try {
-      await _db
-          .collection('pedidos_amizade')
-          .doc(docId)
-          .delete();
+      await _db.collection('pedidos_amizade').doc(docId).delete();
       _carregar();
     } catch (e) {
       debugPrint('Erro ao recusar pedido: $e');
@@ -6856,232 +6772,131 @@ class _TelaAmigosState extends State<TelaAmigos> {
           ),
         ),
         body: _loading
-            ? const Center(
-                child: CircularProgressIndicator())
+            ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // ── Pesquisa ──────────────────────────────────────
                     TextField(
                       controller: _searchCtrl,
                       style: TextStyle(color: _tc()),
                       decoration: InputDecoration(
-                        hintText:
-                            'Pesquisar por @username ou nome...',
-                        hintStyle:
-                            TextStyle(color: _tc38()),
-                        prefixIcon: Icon(Icons.search,
-                            color: _tc54()),
+                        hintText: 'Pesquisar por @username ou nome...',
+                        hintStyle: TextStyle(color: _tc38()),
+                        prefixIcon: Icon(Icons.search, color: _tc54()),
                         suffixIcon: _searching
                             ? const Padding(
-                                padding:
-                                    EdgeInsets.all(12),
-                                child: SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child:
-                                        CircularProgressIndicator(
-                                            strokeWidth:
-                                                2)),
+                                padding: EdgeInsets.all(12),
+                                child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                               )
                             : null,
-                        enabledBorder:
-                            OutlineInputBorder(
-                          borderSide: BorderSide(
-                              color: _tc24()),
-                          borderRadius:
-                              BorderRadius.circular(12),
+                        enabledBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: _tc24()),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        focusedBorder:
-                            const OutlineInputBorder(
-                          borderSide: BorderSide(
-                              color: azul),
-                          borderRadius:
-                              BorderRadius.all(
-                                  Radius.circular(12)),
+                        focusedBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: azul),
+                          borderRadius: BorderRadius.all(Radius.circular(12)),
                         ),
                       ),
-                      onChanged: (v) =>
-                          Future.delayed(
-                        const Duration(
-                            milliseconds: 500),
-                        () {
-                          if (_searchCtrl.text == v)
-                            _pesquisar(v);
-                        },
+                      onChanged: (v) => Future.delayed(
+                        const Duration(milliseconds: 500),
+                        () { if (_searchCtrl.text == v) _pesquisar(v); },
                       ),
                     ),
+
+                    // ── Partilhar o meu perfil ─────────────────────
                     FutureBuilder<DocumentSnapshot>(
                       future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(widget.uid)
-                          .collection('perfil')
-                          .doc('dados')
-                          .get(),
+                          .collection('users').doc(widget.uid)
+                          .collection('perfil').doc('dados').get(),
                       builder: (ctx, snap) {
-                        if (!snap.hasData ||
-                            !snap.data!.exists)
-                          return const SizedBox
-                              .shrink();
-                        final perfil =
-                            PerfilUsuario.fromJson(
-                                snap.data!.data()
-                                    as Map<String,
-                                        dynamic>);
-                        if (perfil.nomedeutilizador
-                            .isEmpty) {
+                        if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+                        final perfil = PerfilUsuario.fromJson(snap.data!.data() as Map<String, dynamic>);
+                        if (perfil.nomedeutilizador.isEmpty) {
                           return Padding(
-                            padding:
-                                const EdgeInsets.only(
-                                    top: 10, bottom: 4),
+                            padding: const EdgeInsets.only(top: 10, bottom: 4),
                             child: Text(
                               '💡 Define um @username no teu perfil para partilhares o teu link.',
-                              style: TextStyle(
-                                  color: _tc38(),
-                                  fontSize: 12),
+                              style: TextStyle(color: _tc38(), fontSize: 12),
                             ),
                           );
                         }
                         return Padding(
-                          padding:
-                              const EdgeInsets.only(
-                                  top: 10),
+                          padding: const EdgeInsets.only(top: 10),
                           child: OutlinedButton.icon(
                             onPressed: () {
-                              Clipboard.setData(
-                                  ClipboardData(
-                                      text:
-                                          '@${perfil.nomedeutilizador}'));
+                              // Copia o username para a área de transferência
+                              Clipboard.setData(ClipboardData(
+                                text: '@${perfil.nomedeutilizador}',
+                              ));
                               Share.share(
                                 'Adiciona-me no Thoth! 📚\n'
                                 'Pesquisa por @${perfil.nomedeutilizador} na aba de Amigos.',
-                                subject:
-                                    'O meu perfil no Thoth',
+                                subject: 'O meu perfil no Thoth',
                               );
                             },
-                            style:
-                                OutlinedButton.styleFrom(
+                            style: OutlinedButton.styleFrom(
                               foregroundColor: azul,
-                              side: const BorderSide(
-                                  color: azul),
-                              minimumSize: const Size(
-                                  double.infinity, 44),
-                              shape:
-                                  RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(
-                                              12)),
+                              side: const BorderSide(color: azul),
+                              minimumSize: const Size(double.infinity, 44),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
-                            icon: const Icon(
-                                Icons.ios_share_rounded,
-                                size: 16),
-                            label: Text(
-                                'Partilhar  @${perfil.nomedeutilizador}'),
+                            icon: const Icon(Icons.ios_share_rounded, size: 16),
+                            label: Text('Partilhar  @${perfil.nomedeutilizador}'),
                           ),
                         );
                       },
                     ),
                     const SizedBox(height: 8),
+
                     if (_resultados.isNotEmpty) ...[
                       const SizedBox(height: 12),
-                      const Text('Resultados',
-                          style: TextStyle(
-                              color: azul,
-                              fontSize: 14,
-                              fontWeight:
-                                  FontWeight.bold)),
+                      const Text('Resultados', style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
                       ..._resultados.map((r) {
-                        final perfil =
-                            r['perfil'] as PerfilUsuario;
-                        final jaAmigo =
-                            r['jaAmigo'] as bool? ??
-                                false;
-                        final jaPedido =
-                            r['jaPedido'] as bool? ??
-                                false;
+                        final perfil = r['perfil'] as PerfilUsuario;
+                        final jaAmigo = r['jaAmigo'] as bool? ?? false;
+                        final jaPedido = r['jaPedido'] as bool? ?? false;
                         return Container(
-                          margin: const EdgeInsets.only(
-                              bottom: 8),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 10),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           decoration: BoxDecoration(
-                            border: Border.all(
-                                color: _tc24()),
-                            borderRadius:
-                                BorderRadius.circular(
-                                    12),
+                            border: Border.all(color: _tc24()),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
                             children: [
                               CircleAvatar(
                                 radius: 20,
-                                backgroundColor: azul
-                                    .withOpacity(0.15),
+                                backgroundColor: azul.withOpacity(0.15),
                                 child: Text(
-                                  perfil.nome.isNotEmpty
-                                      ? perfil.nome[0]
-                                          .toUpperCase()
-                                      : '?',
-                                  style: const TextStyle(
-                                      color: azul,
-                                      fontWeight:
-                                          FontWeight
-                                              .bold),
+                                  perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                  style: const TextStyle(color: azul, fontWeight: FontWeight.bold),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment
-                                          .start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(perfil.nome,
-                                        style: TextStyle(
-                                            color: _tc(),
-                                            fontWeight:
-                                                FontWeight
-                                                    .bold)),
-                                    if (perfil
-                                        .nomedeutilizador
-                                        .isNotEmpty)
-                                      Text(
-                                          '@${perfil.nomedeutilizador}',
-                                          style: TextStyle(
-                                              color:
-                                                  _tc54(),
-                                              fontSize:
-                                                  12)),
+                                    Text(perfil.nome, style: TextStyle(color: _tc(), fontWeight: FontWeight.bold)),
+                                    if (perfil.nomedeutilizador.isNotEmpty)
+                                      Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
                                   ],
                                 ),
                               ),
                               if (jaAmigo)
-                                const Icon(
-                                    Icons.check_circle,
-                                    color: azul,
-                                    size: 20)
+                                const Icon(Icons.check_circle, color: azul, size: 20)
                               else if (jaPedido)
-                                Text('Enviado',
-                                    style: TextStyle(
-                                        color: _tc38(),
-                                        fontSize: 12))
+                                Text('Enviado', style: TextStyle(color: _tc38(), fontSize: 12))
                               else
                                 IconButton(
-                                  icon: const Icon(
-                                      Icons
-                                          .person_add_outlined,
-                                      color: azul),
-                                  onPressed: () =>
-                                      _enviarPedido(
-                                          r['uid']
-                                              as String),
-                                  tooltip:
-                                      'Adicionar amigo',
+                                  icon: const Icon(Icons.person_add_outlined, color: azul),
+                                  onPressed: () => _enviarPedido(r['uid'] as String),
+                                  tooltip: 'Adicionar amigo',
                                 ),
                             ],
                           ),
@@ -7089,140 +6904,1723 @@ class _TelaAmigosState extends State<TelaAmigos> {
                       }),
                       const Divider(height: 24),
                     ],
+
+                    // ── Inbox de pedidos ────────────────────────────
                     Container(
-                      margin: const EdgeInsets.only(
-                          bottom: 20),
+                      margin: const EdgeInsets.only(bottom: 20),
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: _pedidos.isNotEmpty
-                              ? azul.withOpacity(0.5)
-                              : _tc().withOpacity(0.1),
+                          color: _pedidos.isNotEmpty ? azul.withOpacity(0.5) : _tc().withOpacity(0.1),
                         ),
-                        borderRadius:
-                            BorderRadius.circular(14),
-                        color: _pedidos.isNotEmpty
-                            ? azul.withOpacity(0.06)
-                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                        color: _pedidos.isNotEmpty ? azul.withOpacity(0.06) : Colors.transparent,
                       ),
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Padding(
-                            padding:
-                                const EdgeInsets.fromLTRB(
-                                    14, 12, 14, 8),
+                            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
                             child: Row(
                               children: [
-                                const Icon(
-                                    Icons.inbox_rounded,
-                                    color: azul,
-                                    size: 18),
+                                const Icon(Icons.inbox_rounded, color: azul, size: 18),
                                 const SizedBox(width: 8),
-                                const Text(
-                                    'Pedidos de amizade',
-                                    style: TextStyle(
-                                        color: azul,
-                                        fontSize: 14,
-                                        fontWeight:
-                                            FontWeight
-                                                .bold)),
+                                const Text('Pedidos de amizade',
+                                    style: TextStyle(color: azul, fontSize: 14, fontWeight: FontWeight.bold)),
                                 const SizedBox(width: 8),
                                 if (_pedidos.isNotEmpty)
                                   Container(
-                                    padding:
-                                        const EdgeInsets
-                                            .symmetric(
-                                                horizontal:
-                                                    7,
-                                                vertical:
-                                                    2),
-                                    decoration:
-                                        BoxDecoration(
-                                            color: azul,
-                                            borderRadius:
-                                                BorderRadius.circular(
-                                                    10)),
-                                    child: Text(
-                                        '${_pedidos.length}',
-                                        style: const TextStyle(
-                                            color: Colors
-                                                .white,
-                                            fontSize: 11,
-                                            fontWeight:
-                                                FontWeight
-                                                    .bold)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(color: azul, borderRadius: BorderRadius.circular(10)),
+                                    child: Text('${_pedidos.length}',
+                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                                   ),
                               ],
                             ),
                           ),
                           if (_pedidos.isEmpty)
                             Padding(
-                              padding:
-                                  const EdgeInsets
-                                      .fromLTRB(
-                                      14, 0, 14, 14),
-                              child: Text(
-                                  'Nenhum pedido pendente',
-                                  style: TextStyle(
-                                      color: _tc38(),
-                                      fontSize: 13)),
+                              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                              child: Text('Nenhum pedido pendente', style: TextStyle(color: _tc38(), fontSize: 13)),
                             )
                           else
                             ..._pedidos.map((p) {
-                              final perfil =
-                                  p['perfil']
-                                      as PerfilUsuario;
+                              final perfil = p['perfil'] as PerfilUsuario;
                               return Container(
-                                margin:
-                                    const EdgeInsets
-                                        .fromLTRB(
-                                        10, 0, 10, 10),
-                                padding:
-                                    const EdgeInsets
-                                        .symmetric(
-                                        horizontal: 12,
-                                        vertical: 10),
-                                decoration:
-                                    BoxDecoration(
-                                  color: _tc()
-                                      .withOpacity(0.04),
-                                  borderRadius:
-                                      BorderRadius
-                                          .circular(10),
+                                margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: _tc().withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Row(
                                   children: [
                                     CircleAvatar(
                                       radius: 20,
-                                      backgroundColor:
-                                          azul.withOpacity(
-                                              0.15),
-                                      backgroundImage: perfil
-                                              .fotoUrl
-                                              .isNotEmpty
-                                          ? NetworkImage(
-                                              perfil
-                                                  .fotoUrl)
-                                          : null,
-                                      child: perfil
-                                              .fotoUrl
-                                              .isEmpty
-                                          ? Text(
-                                              perfil.nome
-                                                      .isNotEmpty
-                                                  ? perfil
-                                                      .nome[0]
-                                                      .toUpperCase()
-                                                  : '?',
-                                              style: const TextStyle(
-                                                  color:
-                                                      azul,
-                                                  fontWeight:
-                                                      FontWeight.bold))
+                                      backgroundColor: azul.withOpacity(0.15),
+                                      backgroundImage: perfil.fotoUrl.isNotEmpty ? NetworkImage(perfil.fotoUrl) as ImageProvider : null,
+                                      child: perfil.fotoUrl.isEmpty
+                                          ? Text(perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                              style: const TextStyle(color: azul, fontWeight: FontWeight.bold))
                                           : null,
                                     ),
-                                    const SizedBox(
-                                        width: 12),
+                                    const SizedBox(width: 12),
                                     Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(perfil.nome.isNotEmpty ? perfil.nome : 'Utilizador',
+                                              style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 14)),
+                                          if (perfil.nomedeutilizador.isNotEmpty)
+                                            Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc54(), fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 22),
+                                      tooltip: 'Recusar',
+                                      onPressed: () => _recusarPedido(p['uid'] as String, p['docId'] as String),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () => _aceitarPedido(p['uid'] as String, p['docId'] as String),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: azul,
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size(72, 34),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                      child: const Text('Aceitar', style: TextStyle(fontSize: 13)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
+                    ),
+
+                    // ── Lista de amigos ──────────────────────────────
+                    Row(
+                      children: [
+                        Text(
+                          'Os meus amigos',
+                          style: const TextStyle(color: azul, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('(${_amigos.length})', style: TextStyle(color: _tc38(), fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // ── Reacções não lidas ──────────────────────────
+                    StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(widget.uid)
+                          .collection('reacoes')
+                          .where('lida', isEqualTo: false)
+                          .orderBy('criadaEm', descending: true)
+                          .limit(10)
+                          .snapshots(),
+                      builder: (ctx, snapR) {
+                        if (!snapR.hasData || snapR.data!.docs.isEmpty) return const SizedBox.shrink();
+                        final reacoes = snapR.data!.docs;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.4)),
+                            borderRadius: BorderRadius.circular(14),
+                            color: const Color(0xFF1D81C7).withOpacity(0.05),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.favorite_outline, color: Color(0xFF1D81C7), size: 16),
+                                  const SizedBox(width: 6),
+                                  const Text('Novas reacções', style: TextStyle(color: Color(0xFF1D81C7), fontWeight: FontWeight.bold, fontSize: 14)),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(color: const Color(0xFF1D81C7), borderRadius: BorderRadius.circular(8)),
+                                    child: Text('${reacoes.length}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                  const Spacer(),
+                                  TextButton(
+                                    onPressed: () async {
+                                      final batch = FirebaseFirestore.instance.batch();
+                                      for (final doc in reacoes) {
+                                        batch.update(doc.reference, {'lida': true});
+                                      }
+                                      await batch.commit();
+                                    },
+                                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
+                                    child: Text('Marcar lidas', style: TextStyle(color: _tc38(), fontSize: 11)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: reacoes.map((doc) {
+                                  final data = doc.data() as Map<String, dynamic>;
+                                  final emoji = data['emoji'] as String? ?? '👏';
+                                  final de = data['de'] as String? ?? '';
+                                  final amigo = _amigos.firstWhere((a) => a['uid'] == de, orElse: () => {});
+                                  final nomeAmigo = amigo.isNotEmpty
+                                      ? (amigo['perfil'] as PerfilUsuario).nome
+                                      : 'Amigo';
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: _tc().withOpacity(0.06),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: _tc().withOpacity(0.1)),
+                                    ),
+                                    child: Text('$emoji  $nomeAmigo', style: TextStyle(color: _tc(), fontSize: 13)),
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
+                    if (_amigos.isEmpty)
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 40),
+                          child: Column(
+                            children: [
+                              Icon(Icons.group_outlined, size: 56, color: _tc().withOpacity(0.15)),
+                              const SizedBox(height: 12),
+                              Text('Ainda sem amigos', style: TextStyle(color: _tc38(), fontSize: 15)),
+                              const SizedBox(height: 6),
+                              Text('Pesquisa pelo nome para adicionar', style: TextStyle(color: _tc().withOpacity(0.2), fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._amigos.map((a) {
+                        final perfil = a['perfil'] as PerfilUsuario;
+                        final streak = a['streak'] as StreakInfo;
+                        final totalFoco = a['totalFoco'] as int;
+                        final totalSessoes = a['totalSessoes'] as int;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: _tc().withOpacity(0.1)),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Header do amigo
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 22,
+                                    backgroundColor: azul.withOpacity(0.15),
+                                    backgroundImage: perfil.fotoUrl.isNotEmpty
+                                        ? NetworkImage(perfil.fotoUrl)
+                                        : null,
+                                    child: perfil.fotoUrl.isEmpty
+                                        ? Text(
+                                            perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                                            style: const TextStyle(color: azul, fontWeight: FontWeight.bold, fontSize: 18),
+                                          )
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          perfil.nome.isNotEmpty ? perfil.nome : 'Sem nome',
+                                          style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 15),
+                                        ),
+                                        if (perfil.nomedeutilizador.isNotEmpty)
+                                          Text('@${perfil.nomedeutilizador}', style: TextStyle(color: _tc38(), fontSize: 12)),
+                                      ],
+                                    ),
+                                  ),
+                                  // Streak badge do amigo
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: streak.acendeuHoje
+                                          ? const Color(0xFFFF6D00).withOpacity(0.15)
+                                          : _tc().withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: streak.acendeuHoje
+                                            ? const Color(0xFFFF6D00).withOpacity(0.5)
+                                            : _tc24(),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Text('🔥', style: TextStyle(fontSize: 14)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          '${streak.dias}',
+                                          style: TextStyle(
+                                            color: streak.acendeuHoje ? const Color(0xFFFFCC02) : _tc38(),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              // Stats + Reacção
+                              Row(
+                                children: [
+                                  _statAmigo(Icons.timer_outlined, _fmtTempo(totalFoco), 'foco total'),
+                                  const SizedBox(width: 20),
+                                  _statAmigo(Icons.task_alt, '$totalSessoes', 'sessões'),
+                                  const Spacer(),
+                                  _BotaoReacao(amigoUid: a['uid'] as String, meuUid: widget.uid),
+                                ],
+                              ),
+                              // Conquistas do amigo
+                              if (streak.dias > 0) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 4,
+                                  children: StreakInfo.conquistas
+                                      .where((c) => streak.dias >= (c['dias'] as int))
+                                      .map((c) => Tooltip(
+                                            message: c['label'] as String,
+                                            child: Text(c['icon'] as String,
+                                              style: const TextStyle(fontSize: 18)),
+                                          ))
+                                      .toList(),
+                                ),
+                              ],
+                              // Citação se existir
+                              if (perfil.citacao.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  '"${perfil.citacao}"',
+                                  style: TextStyle(color: _tc54(), fontSize: 11, fontStyle: FontStyle.italic),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _statAmigo(IconData icon, String valor, String label) {
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: const Color(0xFF1D81C7)),
+        const SizedBox(width: 4),
+        Text(valor, style: TextStyle(color: _tc(), fontSize: 13, fontWeight: FontWeight.bold)),
+        const SizedBox(width: 3),
+        Text(label, style: TextStyle(color: _tc54(), fontSize: 11)),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// PARTILHA — FUNÇÕES GLOBAIS DE APOIO
+// =============================================================================
+
+/// Captura o widget referenciado por [key] como PNG e abre o share sheet nativo.
+/// Em desktop, guarda o ficheiro na pasta Downloads e mostra um SnackBar.
+Future<void> _partilharImagem({
+  required GlobalKey key,
+  required String texto,
+  BuildContext? context,
+  double pixelRatio = 3.0,
+}) async {
+  try {
+    final boundary =
+        key.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    final image = await boundary.toImage(pixelRatio: pixelRatio);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) return;
+    final pngBytes = byteData.buffer.asUint8List();
+
+    if (_isDesktop) {
+      // Em desktop: guardar na pasta Downloads
+      final dir = await getDownloadsDirectory() ?? await getTemporaryDirectory();
+      final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
+      await file.writeAsBytes(pngBytes);
+      if (context != null && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Imagem guardada em ${file.path}'),
+            backgroundColor: const Color(0xFF1D81C7),
+          ),
+        );
+      }
+      return;
+    }
+
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
+    await file.writeAsBytes(pngBytes);
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'image/png')],
+      text: texto,
+      subject: 'THOTH – O meu progresso de estudo',
+    );
+  } catch (e) {
+    debugPrint('Erro ao partilhar imagem: $e');
+  }
+}
+
+/// Regista a partilha na coleção Firestore users/{uid}/partilhas/
+Future<void> _registarPartilhaFirestore({
+  required String tipo,
+  required int streakDias,
+  required int totalFoco,
+  required int totalCiclos,
+  required int totalSessoes,
+}) async {
+  try {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('partilhas')
+        .add({
+      'tipo': tipo,
+      'streakDias': streakDias,
+      'totalFocoSegundos': totalFoco,
+      'totalCiclos': totalCiclos,
+      'totalSessoes': totalSessoes,
+      'criadaEm': FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    debugPrint('Erro ao registar partilha: $e');
+  }
+}
+
+// =============================================================================
+// DIÁLOGO DE PARTILHA
+// =============================================================================
+
+class _DialogoPartilha extends StatefulWidget {
+  final Widget cartao;
+  final String textoPartilha;
+  final Future<void> Function() aoPartilhar;
+
+  const _DialogoPartilha({
+    required this.cartao,
+    required this.textoPartilha,
+    required this.aoPartilhar,
+  });
+
+  @override
+  State<_DialogoPartilha> createState() => _DialogoPartilhaState();
+}
+
+class _DialogoPartilhaState extends State<_DialogoPartilha> {
+  bool _aPartilhar = false;
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Preview do cartão
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.60,
+            ),
+            child: AspectRatio(
+              aspectRatio: 9 / 16,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: widget.cartao,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Optimizado para Instagram Stories e TikTok',
+            style: TextStyle(color: Colors.white38, fontSize: 11, letterSpacing: 0.5),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: azul,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _aPartilhar
+                  ? null
+                  : () async {
+                      setState(() => _aPartilhar = true);
+                      await widget.aoPartilhar();
+                      if (mounted) Navigator.pop(context);
+                    },
+              icon: _aPartilhar
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.ios_share_rounded, size: 18),
+              label: Text(
+                _aPartilhar ? 'A guardar…' : 'Partilhar',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.white38, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// CARTÃO DE STREAK  (formato story 9:16)
+// =============================================================================
+
+class _StreakShareCard extends StatelessWidget {
+  final int dias;
+  final bool acendeuHoje;
+  final List<Map<String, dynamic>> conquistas;
+  final String? nomeUtilizador;
+
+  const _StreakShareCard({
+    required this.dias,
+    required this.acendeuHoje,
+    this.conquistas = const [],
+    this.nomeUtilizador,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const laranja = Color(0xFFFF6D00);
+    const amarelo = Color(0xFFFFCC02);
+    const azul = Color(0xFF1D81C7);
+    const fundo = Color(0xFF080C12);
+
+    return Container(
+      color: fundo,
+      child: Stack(
+        children: [
+          // Gradiente de fundo
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: acendeuHoje
+                    ? [laranja.withOpacity(0.18), fundo, fundo, azul.withOpacity(0.10)]
+                    : [azul.withOpacity(0.12), fundo, fundo, azul.withOpacity(0.06)],
+              ),
+            ),
+          ),
+          // Anel decorativo
+          Positioned(
+            right: -80,
+            top: -60,
+            child: Container(
+              width: 300, height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: (acendeuHoje ? laranja : azul).withOpacity(0.07),
+                  width: 60,
+                ),
+              ),
+            ),
+          ),
+          // Partículas
+          ..._buildParticulas(acendeuHoje ? laranja : azul),
+          // Conteúdo
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Logo
+                _ShareLogo(),
+                const Spacer(flex: 2),
+                // Número de streak gigante
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '🔥',
+                      style: TextStyle(
+                        fontSize: 52,
+                        shadows: acendeuHoje
+                            ? [Shadow(color: laranja.withOpacity(0.6), blurRadius: 20)]
+                            : [],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ShaderMask(
+                          shaderCallback: (bounds) => LinearGradient(
+                            colors: acendeuHoje
+                                ? [amarelo, laranja]
+                                : [Colors.white, Colors.white70],
+                          ).createShader(bounds),
+                          child: Text(
+                            '$dias',
+                            style: const TextStyle(
+                              fontSize: 80,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              height: 0.9,
+                            ),
+                          ),
+                        ),
+                        const Text(
+                          'dias',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w300,
+                            letterSpacing: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  dias == 1 ? '1 dia de estudo seguido' : '$dias dias de estudo seguidos',
+                  style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w300),
+                ),
+                if (acendeuHoje) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: laranja.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: laranja.withOpacity(0.4)),
+                    ),
+                    child: const Text(
+                      'Streak activa hoje! 💪',
+                      style: TextStyle(color: laranja, fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+                const Spacer(flex: 1),
+                // Conquistas desbloqueadas
+                if (conquistas.where((c) => dias >= (c['dias'] as int)).isNotEmpty) ...[
+                  const Text(
+                    'CONQUISTAS DESBLOQUEADAS',
+                    style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 2, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: conquistas
+                        .where((c) => dias >= (c['dias'] as int))
+                        .map((c) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: laranja.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: laranja.withOpacity(0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(c['icon'] as String, style: const TextStyle(fontSize: 14)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    c['label'] as String,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ],
+                const Spacer(flex: 2),
+                // Rodapé
+                _ShareRodape(nomeUtilizador: nomeUtilizador),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildParticulas(Color cor) {
+    final posicoes = [
+      const Offset(0.85, 0.12), const Offset(0.10, 0.25),
+      const Offset(0.92, 0.40), const Offset(0.05, 0.60),
+      const Offset(0.80, 0.75), const Offset(0.20, 0.88),
+    ];
+    return posicoes.asMap().entries.map((e) {
+      final r = e.key % 2 == 0 ? 3.0 : 1.5;
+      return Positioned.fill(
+        child: FractionallySizedBox(
+          alignment: Alignment(e.value.dx * 2 - 1, e.value.dy * 2 - 1),
+          widthFactor: 0.0,
+          heightFactor: 0.0,
+          child: Container(
+            width: r * 2, height: r * 2,
+            decoration: BoxDecoration(
+              color: cor.withOpacity(0.20),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      );
+    }).toList();
+  }
+}
+
+// =============================================================================
+// CARTÃO DE INSIGHTS (formato story 9:16)
+// =============================================================================
+
+class _InsightsShareCard extends StatelessWidget {
+  final int streakDias;
+  final bool acendeuHoje;
+  final int totalFocoSegundos;
+  final int totalCiclos;
+  final int totalSessoes;
+  final String? tarefaMaisEstudada;
+  final String? nomeUtilizador;
+
+  const _InsightsShareCard({
+    required this.streakDias,
+    required this.acendeuHoje,
+    required this.totalFocoSegundos,
+    required this.totalCiclos,
+    required this.totalSessoes,
+    this.tarefaMaisEstudada,
+    this.nomeUtilizador,
+  });
+
+  String get _tempoFormatado {
+    final h = totalFocoSegundos ~/ 3600;
+    final m = (totalFocoSegundos % 3600) ~/ 60;
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    const laranja = Color(0xFFFF6D00);
+    const fundo = Color(0xFF080C12);
+
+    return Container(
+      color: fundo,
+      child: Stack(
+        children: [
+          // Gradiente
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [azul.withOpacity(0.14), fundo, fundo, const Color(0xFF0A1A2E)],
+              ),
+            ),
+          ),
+          // Grade decorativa subtil
+          Positioned.fill(
+            child: CustomPaint(painter: _GradePainter()),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ShareLogo(),
+                const SizedBox(height: 6),
+                const Text(
+                  'OS MEUS INSIGHTS DE ESTUDO',
+                  style: TextStyle(color: Colors.white38, fontSize: 9, letterSpacing: 1.5),
+                ),
+                const Spacer(flex: 1),
+                // Streak destaque
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [laranja.withOpacity(0.15), laranja.withOpacity(0.05)],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: laranja.withOpacity(0.35)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Text('🔥', style: TextStyle(fontSize: 28)),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$streakDias ${streakDias == 1 ? 'dia' : 'dias'} de streak',
+                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            acendeuHoje ? 'Streak activa hoje! 💪' : 'Continua a estudar!',
+                            style: const TextStyle(color: Colors.white54, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Grelha de stats
+                Row(
+                  children: [
+                    Expanded(child: _ShareStatBox(emoji: '⏱', valor: _tempoFormatado, label: 'foco total', destaque: true)),
+                    const SizedBox(width: 10),
+                    Expanded(child: _ShareStatBox(emoji: '🔁', valor: '$totalCiclos', label: 'ciclos')),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: _ShareStatBox(emoji: '✅', valor: '$totalSessoes', label: 'sessões')),
+                    const SizedBox(width: 10),
+                    Expanded(child: _ShareStatBox(
+                      emoji: '🎯',
+                      valor: tarefaMaisEstudada ?? '—',
+                      label: 'mais estudada',
+                      pequeno: true,
+                    )),
+                  ],
+                ),
+                const Spacer(flex: 2),
+                _ShareRodape(nomeUtilizador: nomeUtilizador),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// COMPONENTES PARTILHADOS DOS CARTÕES
+// =============================================================================
+
+class _ShareLogo extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.6)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        'THOTH',
+        style: TextStyle(
+          color: Color(0xFF1D81C7),
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 3,
+        ),
+      ),
+    );
+  }
+}
+
+class _ShareRodape extends StatelessWidget {
+  final String? nomeUtilizador;
+  const _ShareRodape({this.nomeUtilizador});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 6, height: 6,
+              decoration: const BoxDecoration(color: Color(0xFF1D81C7), shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            const Text('thoth.app', style: TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 1)),
+          ],
+        ),
+        if (nomeUtilizador != null && nomeUtilizador!.isNotEmpty)
+          Text('@$nomeUtilizador', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+      ],
+    );
+  }
+}
+
+class _ShareStatBox extends StatelessWidget {
+  final String emoji;
+  final String valor;
+  final String label;
+  final bool destaque;
+  final bool pequeno;
+
+  const _ShareStatBox({
+    required this.emoji,
+    required this.valor,
+    required this.label,
+    this.destaque = false,
+    this.pequeno = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const azul = Color(0xFF1D81C7);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: destaque ? azul.withOpacity(0.12) : Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: destaque ? azul.withOpacity(0.5) : Colors.white.withOpacity(0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 6),
+          Text(
+            valor,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: pequeno ? 13 : 22,
+              fontWeight: FontWeight.bold,
+              height: 1.1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(label, style: const TextStyle(color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
+        ],
+      ),
+    );
+  }
+}
+
+class _GradePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF1D81C7).withOpacity(0.04)
+      ..strokeWidth = 1;
+    const step = 40.0;
+    for (double x = 0; x < size.width; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    for (double y = 0; y < size.height; y += step) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// =============================================================================
+// TOMATO PAINTER
+// =============================================================================
+
+// =============================================================================
+// TELA: TAREFAS CONCLUÍDAS
+// =============================================================================
+class _TelaTarefasConcluidas extends StatefulWidget {
+  final _PomodoroAppState state;
+  const _TelaTarefasConcluidas({required this.state});
+  @override
+  State<_TelaTarefasConcluidas> createState() => _TelaTarefasConcluidasState();
+}
+
+class _TelaTarefasConcluidasState extends State<_TelaTarefasConcluidas> {
+  @override
+  Widget build(BuildContext context) {
+    const azul = _PomodoroAppState._azul;
+    final concluidas = widget.state.tarefas.where((t) => t.progressoSalvo >= 1.0).toList();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tarefas Concluídas'),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: _tc()),
+          onPressed: () => Navigator.pop(context),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(color: azul, height: 1),
+        ),
+      ),
+      body: concluidas.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.emoji_events_outlined, size: 70, color: _tc().withOpacity(0.2)),
+                  const SizedBox(height: 16),
+                  Text('Ainda sem tarefas concluídas',
+                      style: TextStyle(color: _tc().withOpacity(0.5), fontSize: 16)),
+                  const SizedBox(height: 6),
+                  Text('Quando terminares uma tarefa, ela aparece aqui.',
+                      style: TextStyle(color: _tc().withOpacity(0.3), fontSize: 12)),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: concluidas.length,
+              itemBuilder: (ctx, i) {
+                final t = concluidas[i];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.greenAccent.withOpacity(0.5)),
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.greenAccent.withOpacity(0.05),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.greenAccent, size: 32),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(t.nome.isEmpty ? 'Sem nome' : t.nome,
+                                style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 16)),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Foco: ${t.estudo ~/ 60}m  ·  Descanso: ${t.descanso ~/ 60}m  ·  ${t.ciclos} ciclos',
+                              style: const TextStyle(color: azul, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Reabrir tarefa',
+                        icon: Icon(Icons.refresh, color: _tc().withOpacity(0.7)),
+                        onPressed: () {
+                          // ignore: invalid_use_of_protected_member
+                          widget.state.setState(() {
+                            t.progressoSalvo = 0.0;
+                            t.cicloSalvo = 1;
+                            t.estavaNoDescanso = false;
+                            t.segundosSalvos = t.estudo;
+                          });
+                          widget.state._guardarTudo();
+                          setState(() {});
+                        },
+                      ),
+                      IconButton(
+                        tooltip: 'Eliminar definitivamente',
+                        icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                        onPressed: () {
+                          final tarefaId = t.id;
+                          // ignore: invalid_use_of_protected_member
+                          widget.state.setState(() {
+                            widget.state.tarefas.removeWhere((x) => x.id == t.id);
+                            if (widget.state.ultimaTarefa?.id == t.id) {
+                              widget.state.ultimaTarefa = null;
+                            }
+                          });
+                          // Apagar do Firestore
+                          widget.state._tarefasCol.doc(tarefaId).delete()
+                              .catchError((e) => debugPrint('Erro ao apagar tarefa: $e'));
+                          widget.state._guardarTudo();
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+}
+
+
+
+// =============================================================================
+// STREAK FREEZE — já integrado em _StreakDialog acima
+// =============================================================================
+
+// =============================================================================
+// META SEMANAL — Bottom Sheet
+// =============================================================================
+
+class _BottomSheetMetaSemanal extends StatefulWidget {
+  final List<SessaoConcluida> sessoes;
+  final int metaAtual;
+  final ValueChanged<int> onSalvar;
+  const _BottomSheetMetaSemanal({required this.sessoes, required this.metaAtual, required this.onSalvar});
+  @override
+  State<_BottomSheetMetaSemanal> createState() => _BottomSheetMetaSemanalState();
+}
+
+class _BottomSheetMetaSemanalState extends State<_BottomSheetMetaSemanal> {
+  late int _meta;
+  static const azul = Color(0xFF1D81C7);
+
+  @override
+  void initState() {
+    super.initState();
+    _meta = widget.metaAtual == 0 ? 300 : widget.metaAtual; // default 5h
+  }
+
+  int _minutosEstaSemana() {
+    final hoje = DateTime.now();
+    final inicioSemana = hoje.subtract(Duration(days: hoje.weekday - 1));
+    final semanaStr = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+    return widget.sessoes
+        .where((s) => s.dataConclusao.isAfter(semanaStr))
+        .fold(0, (acc, s) => acc + s.tempoFocoSegundos ~/ 60);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progresso = _meta > 0 ? (_minutosEstaSemana() / _meta).clamp(0.0, 1.0) : 0.0;
+    final mins = _minutosEstaSemana();
+    final bg = temaEscuro.value ? const Color(0xFF111111) : Colors.white;
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: const Border(top: BorderSide(color: azul, width: 2)),
+      ),
+      padding: EdgeInsets.only(
+        left: 24, right: 24, top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)))),
+          const SizedBox(height: 20),
+          const Text('🎯  Meta Semanal', style: TextStyle(color: azul, fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          // Progresso desta semana
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: azul.withOpacity(0.07),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: azul.withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Esta semana', style: TextStyle(color: _tc54(), fontSize: 13)),
+                    Text(
+                      '${mins ~/ 60}h ${mins % 60}m / ${_meta ~/ 60}h ${_meta % 60 == 0 ? '' : '${_meta % 60}m'}',
+                      style: TextStyle(color: _tc(), fontSize: 13, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: progresso,
+                    minHeight: 10,
+                    color: progresso >= 1.0 ? Colors.greenAccent : azul,
+                    backgroundColor: _tc().withOpacity(0.08),
+                  ),
+                ),
+                if (progresso >= 1.0) ...[
+                  const SizedBox(height: 8),
+                  const Row(
+                    children: [
+                      Text('🏆', style: TextStyle(fontSize: 16)),
+                      SizedBox(width: 6),
+                      Text('Meta atingida esta semana!', style: TextStyle(color: Colors.greenAccent, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Meta: ${_meta ~/ 60}h ${_meta % 60 > 0 ? '${_meta % 60}m' : ''}', style: const TextStyle(color: azul, fontWeight: FontWeight.bold, fontSize: 15)),
+              Text('por semana', style: TextStyle(color: _tc54(), fontSize: 13)),
+            ],
+          ),
+          Slider(
+            value: _meta.toDouble(),
+            min: 30,
+            max: 1200,
+            divisions: 39,
+            label: '${_meta ~/ 60}h ${_meta % 60 > 0 ? '${_meta % 60}m' : ''}',
+            onChanged: (v) => setState(() => _meta = (v ~/ 30) * 30),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [60, 120, 180, 300, 600].map((m) => OutlinedButton(
+              onPressed: () => setState(() => _meta = m),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _meta == m ? Colors.white : azul,
+                backgroundColor: _meta == m ? azul : null,
+                side: BorderSide(color: azul.withOpacity(0.5)),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                minimumSize: const Size(0, 32),
+              ),
+              child: Text('${m ~/ 60}h', style: const TextStyle(fontSize: 12)),
+            )).toList(),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                widget.onSalvar(_meta);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: azul,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('GUARDAR META', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// LEADERBOARD GLOBAL
+// =============================================================================
+
+class TelaLeaderboard extends StatefulWidget {
+  const TelaLeaderboard({super.key});
+  @override
+  State<TelaLeaderboard> createState() => _TelaLeaderboardState();
+}
+
+class _TelaLeaderboardState extends State<TelaLeaderboard> with SingleTickerProviderStateMixin {
+  static const azul = Color(0xFF1D81C7);
+  late TabController _tabCtrl;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  String get _uid => FirebaseAuth.instance.currentUser!.uid;
+
+  List<Map<String, dynamic>> _rankingStreak = [];
+  List<Map<String, dynamic>> _rankingTempo = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _carregarLeaderboard();
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _carregarLeaderboard() async {
+    setState(() => _loading = true);
+    try {
+      // Buscar todos os utilizadores do índice global (máx 50)
+      final snap = await _db.collection('usernames').limit(50).get();
+      final lista = <Map<String, dynamic>>[];
+
+      for (final doc in snap.docs) {
+        final uid = doc.data()['uid'] as String? ?? '';
+        if (uid.isEmpty) continue;
+        try {
+          // Verificar se conta é privada
+          final cfgSnap = await _db.collection('users').doc(uid).collection('config').doc('dados').get();
+          final privado = cfgSnap.exists ? (cfgSnap.data()?['contaPrivada'] as bool? ?? false) : false;
+          if (privado && uid != _uid) continue;
+
+          final perfilSnap = await _db.collection('users').doc(uid).collection('perfil').doc('dados').get();
+          if (!perfilSnap.exists) continue;
+          final perfil = PerfilUsuario.fromJson(perfilSnap.data()!);
+
+          final sessoesSnap = await _db.collection('users').doc(uid).collection('sessoes').orderBy('dataConclusao').get();
+          final sessoes = sessoesSnap.docs.map((d) => SessaoConcluida.fromJson(d.data())).toList();
+
+          final freezeDias = cfgSnap.exists ? List<String>.from(cfgSnap.data()?['freezeDias'] as List? ?? []) : <String>[];
+          final streak = StreakInfo.calcularComFreeze(sessoes, freezeDias);
+          final totalFoco = sessoes.fold<int>(0, (s, e) => s + e.tempoFocoSegundos);
+
+          lista.add({
+            'uid': uid,
+            'perfil': perfil,
+            'streak': streak,
+            'totalFoco': totalFoco,
+            'totalSessoes': sessoes.length,
+            'euProprio': uid == _uid,
+          });
+        } catch (_) {}
+      }
+
+      // Ranking por streak
+      final porStreak = [...lista]..sort((a, b) => (b['streak'] as StreakInfo).dias.compareTo((a['streak'] as StreakInfo).dias));
+      // Ranking por tempo de foco
+      final porTempo = [...lista]..sort((a, b) => (b['totalFoco'] as int).compareTo(a['totalFoco'] as int));
+
+      if (mounted) setState(() {
+        _rankingStreak = porStreak;
+        _rankingTempo = porTempo;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('Erro leaderboard: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  String _fmtTempo(int seg) {
+    if (seg >= 3600) {
+      final h = seg ~/ 3600;
+      final m = (seg % 3600) ~/ 60;
+      return m > 0 ? '${h}h ${m}m' : '${h}h';
+    }
+    return '${seg ~/ 60}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Leaderboard Global'),
+        bottom: TabBar(
+          controller: _tabCtrl,
+          indicatorColor: azul,
+          labelColor: azul,
+          unselectedLabelColor: Colors.white54,
+          tabs: const [
+            Tab(icon: Icon(Icons.local_fire_department_outlined), text: 'Streak'),
+            Tab(icon: Icon(Icons.timer_outlined), text: 'Tempo de Foco'),
+          ],
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: azul))
+          : TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _ListaRanking(
+                  lista: _rankingStreak,
+                  valorBuilder: (e) => '🔥 ${(e['streak'] as StreakInfo).dias} dias',
+                  subBuilder: (e) => '${e['totalSessoes']} sessões',
+                ),
+                _ListaRanking(
+                  lista: _rankingTempo,
+                  valorBuilder: (e) => '⏱ ${_fmtTempo(e['totalFoco'] as int)}',
+                  subBuilder: (e) => '${(e['streak'] as StreakInfo).dias} dias streak',
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _ListaRanking extends StatelessWidget {
+  final List<Map<String, dynamic>> lista;
+  final String Function(Map<String, dynamic>) valorBuilder;
+  final String Function(Map<String, dynamic>) subBuilder;
+
+  const _ListaRanking({required this.lista, required this.valorBuilder, required this.subBuilder});
+
+  static const List<String> _medalhas = ['🥇', '🥈', '🥉'];
+
+  @override
+  Widget build(BuildContext context) {
+    if (lista.isEmpty) {
+      return Center(child: Text('Sem dados', style: TextStyle(color: _tc38())));
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: lista.length,
+      itemBuilder: (ctx, i) {
+        final e = lista[i];
+        final perfil = e['perfil'] as PerfilUsuario;
+        final euProprio = e['euProprio'] as bool? ?? false;
+        const azul = Color(0xFF1D81C7);
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: euProprio ? azul.withOpacity(0.08) : Colors.transparent,
+            border: Border.all(
+              color: euProprio ? azul.withOpacity(0.6) : _tc().withOpacity(0.1),
+            ),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 32,
+                child: Text(
+                  i < 3 ? _medalhas[i] : '${i + 1}',
+                  style: TextStyle(
+                    fontSize: i < 3 ? 22 : 15,
+                    fontWeight: FontWeight.bold,
+                    color: i >= 3 ? _tc38() : null,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 12),
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: azul.withOpacity(0.15),
+                backgroundImage: perfil.fotoUrl.isNotEmpty ? NetworkImage(perfil.fotoUrl) as ImageProvider : null,
+                child: perfil.fotoUrl.isEmpty
+                    ? Text(perfil.nome.isNotEmpty ? perfil.nome[0].toUpperCase() : '?',
+                        style: const TextStyle(color: azul, fontWeight: FontWeight.bold))
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          perfil.nome.isNotEmpty ? perfil.nome : 'Utilizador',
+                          style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        if (euProprio) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(color: azul, borderRadius: BorderRadius.circular(8)),
+                            child: const Text('Tu', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    Text(subBuilder(e), style: TextStyle(color: _tc54(), fontSize: 12)),
+                  ],
+                ),
+              ),
+              Text(valorBuilder(e), style: const TextStyle(color: Color(0xFF1D81C7), fontWeight: FontWeight.bold, fontSize: 14)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// REACÇÕES ENTRE AMIGOS
+// =============================================================================
+
+class _BotaoReacao extends StatefulWidget {
+  final String amigoUid;
+  final String meuUid;
+  const _BotaoReacao({required this.amigoUid, required this.meuUid});
+  @override
+  State<_BotaoReacao> createState() => _BotaoReacaoState();
+}
+
+class _BotaoReacaoState extends State<_BotaoReacao> {
+  bool _enviando = false;
+  String? _ultimaReacao;
+
+  Future<void> _enviarReacao(String emoji) async {
+    if (_enviando) return;
+    setState(() { _enviando = true; _ultimaReacao = emoji; });
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.amigoUid)
+          .collection('reacoes')
+          .add({
+        'de': widget.meuUid,
+        'emoji': emoji,
+        'lida': false,
+        'criadaEm': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$emoji Reacção enviada!'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erro ao enviar reacção: $e');
+    }
+    if (mounted) setState(() => _enviando = false);
+  }
+
+  void _mostrarPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: temaEscuro.value ? const Color(0xFF111111) : Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Enviar reacção', style: TextStyle(color: _tc(), fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: _reacoes.map((emoji) => GestureDetector(
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _enviarReacao(emoji);
+                  },
+                  child: Container(
+                    width: 52, height: 52,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1D81C7).withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.2)),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(emoji, style: const TextStyle(fontSize: 26)),
+                  ),
+                )).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _mostrarPicker(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFF1D81C7).withOpacity(0.35)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_ultimaReacao ?? '👏', style: const TextStyle(fontSize: 16)),
+            const SizedBox(width: 4),
+            const Icon(Icons.add, size: 13, color: Color(0xFF1D81C7)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// NOTIFICAÇÕES DE REACÇÕES (badge no drawer de Amigos)
+// =============================================================================
+
+/// Logo de tomate realista: corpo esférico com gradiente radial,
+/// sulco vertical, sombra inferior, brilho especular, sépalas (folhas
+/// estreladas em volta do pedúnculo) e haste curva.
+class _TomatoPainter extends CustomPainter {
+  const _TomatoPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2 + size.height * 0.10;
+    final r  = size.width * 0.40;
+
+    // ── 1. Sombra debaixo (no canvas, parece "assenta") ─────────────────
+    final shadow = Paint()
+      ..color = Colors.black.withOpacity(0.18)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx, cy + r * 0.95), width: r * 1.6, height: r * 0.32),
+      shadow,
+    );
+
+    // ── 2. Corpo do tomate ─ esfera achatada com gradiente radial ───────
+    final bodyRect = Rect.fromCenter(center: Offset(cx, cy), width: r * 2.05, height: r * 1.95);
+    final body = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.35, -0.45), radius: 1.05,
+        colors: const [
+          Color(0xFFFF8A65), // highlight quente
+          Color(0xFFEF5350), // vermelho médio
+          Color(0xFFD32F2F), // vermelho saturado
+          Color(0xFF8B1B1B), // sombra escura
+        ],
+        stops: const [0.0, 0.45, 0.78, 1.0],
+      ).createShader(bodyRect);
+    canvas.drawOval(bodyRect, body);
+
+    // ── 3. Sulco vertical (acanaladuras típicas do tomate) ──────────────
+    final groove = Paint()
+      ..color = const Color(0xFF7A1212).withOpacity(0.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.04;
+    for (final dx in [-0.55, 0.0, 0.55]) {
+      final path = Path()
+        ..moveTo(cx + r * dx * 0.9, cy - r * 0.85)
+        ..quadraticBezierTo(cx + r * dx, cy, cx + r * dx * 0.9, cy + r * 0.85);
+      canvas.drawPath(path, groove);
+    }
+
+    // ── 4. Brilho especular suave (gota de luz) ─────────────────────────
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx - r * 0.30, cy - r * 0.45), width: r * 0.55, height: r * 0.30),
+      Paint()
+        ..color = Colors.white.withOpacity(0.40)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5),
+    );
+    // brilho secundário pequeno
+    canvas.drawCircle(
+      Offset(cx - r * 0.15, cy - r * 0.55),
+      r * 0.06,
+      Paint()..color = Colors.white.withOpacity(0.75),
+    );
+
+    // ── 5. Sépalas (estrela verde de 5 pontas sobre o topo) ─────────────
+    final calyxCenter = Offset(cx, cy - r * 0.85);
+    final calyxColor = const Color(0xFF2E7D32);
+    final calyxLight = const Color(0xFF66BB6A);
+    final sepalPath = Path();
+    const numLeaves = 5;
+    for (int i = 0; i < numLeaves; i++) {
+      final angle = -math.pi / 2 + (i * 2 * math.pi / numLeaves);
+      final tip = Offset(
+        calyxCenter.dx + math.cos(angle) * r * 0.55,
+        calyxCenter.dy + math.sin(angle) * r * 0.42 - r * 0.05,
+      );
+      final leftCtrl = Offset(
+        calyxCenter.dx + math.cos(angle - 0.45) * r * 0.32,
+        calyxCenter.dy + math.sin(angle - 0.45) * r * 0.20,
+      );
+      final rightCtrl = Offset(
+        calyxCenter.dx + math.cos(angle + 0.45) * r * 0.32,
+        calyxCenter.dy + math.sin(angle + 0.45) * r * 0.20,
+      );
+      sepalPath
+        ..moveTo(calyxCenter.dx, calyxCenter.dy)
+        ..quadraticBezierTo(leftCtrl.dx, leftCtrl.dy, tip.dx, tip.dy)
+        ..quadraticBezierTo(rightCtrl.dx, rightCtrl.dy, calyxCenter.dx, calyxCenter.dy)
+        ..close();
+    }
+    // Sombra das sépalas
+    canvas.drawPath(
+      sepalPath.shift(Offset(0, r * 0.04)),
+      Paint()..color = Colors.black.withOpacity(0.25)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2),
+    );
+    // Sépalas com gradiente
+    final sepalShader = RadialGradient(
+      center: const Alignment(-0.2, -0.4),
+      colors: [calyxLight, calyxColor],
+    ).createShader(Rect.fromCenter(center: calyxCenter, width: r * 1.2, height: r * 0.8));
+    canvas.drawPath(sepalPath, Paint()..shader = sepalShader);
+    // Linhas centrais nas sépalas para definição
+    final veinPaint = Paint()
+      ..color = const Color(0xFF1B5E20).withOpacity(0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.025
+      ..strokeCap = StrokeCap.round;
+    for (int i = 0; i < numLeaves; i++) {
+      final angle = -math.pi / 2 + (i * 2 * math.pi / numLeaves);
+      canvas.drawLine(
+        calyxCenter,
+        Offset(
+          calyxCenter.dx + math.cos(angle) * r * 0.45,
+          calyxCenter.dy + math.sin(angle) * r * 0.35 - r * 0.05,
+        ),
+        veinPaint,
+      );
+    }
+
+    // ── 6. Haste castanha curva ─────────────────────────────────────────
+    final stemPath = Path()
+      ..moveTo(calyxCenter.dx, calyxCenter.dy)
+      ..quadraticBezierTo(
+        calyxCenter.dx + r * 0.18, calyxCenter.dy - r * 0.30,
+        calyxCenter.dx + r * 0.08, calyxCenter.dy - r * 0.55,
+      );
+    canvas.drawPath(
+      stemPath,
+      Paint()
+        ..color = const Color(0xFF5D4037)
+        ..strokeWidth = r * 0.10
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke,
+    );
+    // brilho na haste
+    canvas.drawPath(
+      stemPath,
+      Paint()
+        ..color = const Color(0xFF8D6E63).withOpacity(0.6)
+        ..strokeWidth = r * 0.04
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
                                       child:
