@@ -8,6 +8,11 @@ class FlutterBackgroundService {
     required dynamic androidConfiguration,
     required dynamic iosConfiguration,
   }) async {}
+
+  // invoke existe na instância na web — é um no-op
+  void invoke(String method, [Map<String, dynamic>? args]) {}
+
+  Stream<Map<String, dynamic>?> on(String method) => const Stream.empty();
 }
 
 class AndroidConfiguration {
