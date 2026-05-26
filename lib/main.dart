@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -34,8 +34,14 @@ import 'firebase_options.dart';
 const List<String> _reacoes = ['🔥', '💪', '👏', '⚡', '🎯', '🏆'];
 
 // ─── Helpers de plataforma ───────────────────────────────────────────────────
+// Usa defaultTargetPlatform (disponível em todas as plataformas incl. web)
+// em vez de Platform.isX que requer dart:io e não existe na web.
 bool get _isDesktop =>
-    !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+    !kIsWeb && (
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.linux
+    );
 
 /// ─── Serviço de Persistência de Sessão ──────────────────────────────────────
 class SessionPersistenceService {
@@ -871,7 +877,7 @@ class _PomodoroAppState extends State<PomodoroApp>
     // Relançar o ticker
     _timer?.cancel();
     // Se o timer foi restaurado a correr, activar wakelock
-    if (!estava && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if (!estava && !kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
       WakelockPlus.enable();
     }
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1173,7 +1179,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   @override
   void dispose() {
     _timer?.cancel();
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
       WakelockPlus.disable();
     }
     _salvarEstadoAtual();
@@ -1372,7 +1378,7 @@ class _PomodoroAppState extends State<PomodoroApp>
   void alternarPausa() {
     setState(() { pausado = !pausado; _primeiraVez = false; });
     // Manter o ecrã (e processo) activo enquanto o timer corre
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
       WakelockPlus.toggle(enable: !pausado);
     }
     _guardarEstadoTimer();
@@ -1402,11 +1408,11 @@ class _PomodoroAppState extends State<PomodoroApp>
   void finalizar() {
     _timer?.cancel();
     // Parar Foreground Service
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      FlutterBackgroundService().invoke('stop');
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
+      try { FlutterBackgroundService().invoke('stop'); } catch (_) {}
     }
     // Libertar o wakelock ao terminar
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
       WakelockPlus.disable();
     }
     _tocarSom(fim: true);
@@ -1455,11 +1461,11 @@ class _PomodoroAppState extends State<PomodoroApp>
   void reset() {
     _timer?.cancel();
     // Parar Foreground Service
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      FlutterBackgroundService().invoke('stop');
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
+      try { FlutterBackgroundService().invoke('stop'); } catch (_) {}
     }
     // Libertar o wakelock ao cancelar
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    if (!kIsWeb && ((defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS))) {
       WakelockPlus.disable();
     }
     if (tarefaAtual != null &&
