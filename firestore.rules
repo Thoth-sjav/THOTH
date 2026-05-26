@@ -17,6 +17,10 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/users/$(meuUid)/amigos/$(amigoUid))
         && get(/databases/$(database)/documents/users/$(meuUid)/amigos/$(amigoUid)).data.estado == 'aceite';
     }
+    // Verifica se a conta do utilizador é pública
+    function contaPublica(uid) {
+      return !get(/databases/$(database)/documents/users/$(uid)/config/dados).data.get('contaPrivada', false);
+    }
 
     // ─────────────────────────────────────────────
     // /users/{uid}  — documento raiz do utilizador
@@ -24,21 +28,26 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, write: if isOwner(uid);
 
-      // perfil — dono escreve; qualquer autenticado lê (necessário para pesquisa de amigos)
+      // perfil — dono escreve; qualquer autenticado lê (necessário para pesquisa de amigos e leaderboard)
       match /perfil/{doc} {
         allow read: if isAuth();
         allow write: if isOwner(uid);
       }
 
-      // sessoes — dono lê/escreve; amigos só lêem (para mostrar streak/stats)
+      // sessoes — dono lê/escreve; amigos lêem; qualquer autenticado lê se conta pública (leaderboard)
       match /sessoes/{doc} {
-        allow read: if isOwner(uid) || saoAmigos(request.auth.uid, uid);
+        allow read: if isOwner(uid)
+                    || saoAmigos(request.auth.uid, uid)
+                    || (isAuth() && contaPublica(uid));
         allow write: if isOwner(uid);
       }
 
-      // config — privado, só o dono
+      // config — dono lê/escreve; qualquer autenticado lê (necessário para verificar contaPrivada no leaderboard)
+      // Nota: apenas o campo 'contaPrivada' e 'freezeDias' são necessários externamente.
+      //       Se quiser restringir ao máximo, separe estes campos num documento público.
       match /config/{doc} {
-        allow read, write: if isOwner(uid);
+        allow read: if isAuth();
+        allow write: if isOwner(uid);
       }
 
       // tarefas — privado, só o dono
@@ -52,35 +61,18 @@ service cloud.firestore {
       }
 
       // amigos — dono lê/escreve a sua lista
-      // O batch do _aceitarPedido escreve também na lista do remetente:
-      //   users/{remetenteUid}/amigos/{meuUid} -> permite se o doc de pedido existe
       match /amigos/{amigoUid} {
         allow read: if isOwner(uid);
-        // Dono pode sempre gerir a sua lista
         allow write: if isOwner(uid);
-        // Outro utilizador autenticado pode escrever APENAS para criar/actualizar
-        // a amizade aceite — só quando existe um pedido pendente entre os dois
-        allow create, update: if isAuth()
-          && request.auth.uid == amigoUid
-          && request.resource.data.estado == 'aceite'
-          && exists(/databases/$(database)/documents/pedidos_amizade/$(
-              // Não podemos fazer query aqui; a validação real é feita pelo batch
-              // que apaga o pedido ao mesmo tempo. Permitimos se o escritor é o amigoUid.
-              uid  // placeholder — a regra abaixo é suficiente na prática
-            ));
-        // Simplificação segura: permite escrita se o escritor é o amigoUid
-        // (só acontece no batch de _aceitarPedido) e o estado é 'aceite'
         allow create, update: if isAuth()
           && request.auth.uid == amigoUid
           && request.resource.data.keys().hasOnly(['estado'])
           && request.resource.data.estado == 'aceite';
       }
 
-      // reacoes — dono lê e marca como lidas; qualquer amigo pode adicionar
+      // reacoes — dono lê e marca como lidas; qualquer autenticado pode criar
       match /reacoes/{doc} {
         allow read, update: if isOwner(uid);
-        // Qualquer utilizador autenticado pode escrever uma reacção
-        // (validamos que o campo 'de' corresponde ao auth uid)
         allow create: if isAuth()
           && request.resource.data.de == request.auth.uid
           && request.resource.data.keys().hasAll(['de', 'emoji', 'lida', 'criadaEm'])
@@ -92,10 +84,7 @@ service cloud.firestore {
     // /usernames/{username}  — índice global de pesquisa
     // ─────────────────────────────────────────────
     match /usernames/{username} {
-      // Qualquer autenticado lê (necessário para pesquisa de amigos)
       allow read: if isAuth();
-      // Só o próprio utilizador escreve o seu username
-      // Valida que o uid no documento corresponde ao auth uid
       allow create, update: if isAuth()
         && request.resource.data.uid == request.auth.uid;
       allow delete: if isAuth()
@@ -106,24 +95,20 @@ service cloud.firestore {
     // /pedidos_amizade/{docId}
     // ─────────────────────────────────────────────
     match /pedidos_amizade/{docId} {
-      // Lê: só os envolvidos (remetente ou destinatário)
       allow read: if isAuth()
         && (resource.data.de == request.auth.uid
             || resource.data.para == request.auth.uid);
 
-      // Cria: só o próprio pode enviar em nome próprio
       allow create: if isAuth()
         && request.resource.data.de == request.auth.uid
         && request.resource.data.keys().hasAll(['de', 'para', 'estado', 'data'])
         && request.resource.data.estado == 'pendente'
         && request.resource.data.de != request.resource.data.para;
 
-      // Apaga: remetente pode cancelar; destinatário pode recusar/aceitar
       allow delete: if isAuth()
         && (resource.data.de == request.auth.uid
             || resource.data.para == request.auth.uid);
 
-      // Update: só o destinatário pode alterar o estado
       allow update: if isAuth()
         && resource.data.para == request.auth.uid;
     }
