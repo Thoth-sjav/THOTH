@@ -585,54 +585,59 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> signInWithGoogle() async {
     setState(() => _loading = true);
     try {
-      // Web Client ID do Firebase Authentication → Sign-in method → Google → Web client ID
-      final GoogleSignIn googleSignIn = GoogleSignIn(
-        clientId: kIsWeb
-            ? '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com'
-            : null,
-        serverClientId: kIsWeb
-            ? null
-            : '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com',
-      );
+      UserCredential userCredential;
 
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      if (kIsWeb) {
+        // Na web: usar signInWithPopup diretamente via Firebase Auth
+        final googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('email');
+        googleProvider.addScope('profile');
 
-      if (googleUser == null) {
-        setState(() => _loading = false);
-        return;
-      }
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      if (googleAuth.idToken == null) {
-        debugPrint('ERRO: idToken é null. Verifica o SHA-1 no Firebase Console.');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Erro de autenticação. Verifica a ligação e tenta novamente.')),
-          );
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null && currentUser.isAnonymous) {
+          userCredential = await currentUser.linkWithPopup(googleProvider);
+        } else {
+          userCredential = await FirebaseAuth.instance.signInWithPopup(googleProvider);
         }
-        setState(() => _loading = false);
-        return;
+      } else {
+        // Mobile/Desktop: usar google_sign_in normalmente
+        final GoogleSignIn googleSignIn = GoogleSignIn(
+          serverClientId: '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com',
+        );
+
+        final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+        if (googleUser == null) {
+          setState(() => _loading = false);
+          return;
+        }
+
+        final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+        if (googleAuth.idToken == null) {
+          debugPrint('ERRO: idToken é null. Verifica o SHA-1 no Firebase Console.');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Erro de autenticação. Verifica a ligação e tenta novamente.')),
+            );
+          }
+          setState(() => _loading = false);
+          return;
+        }
+
+        final credential = GoogleAuthProvider.credential(
+          accessToken: googleAuth.accessToken,
+          idToken: googleAuth.idToken,
+        );
+
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null && currentUser.isAnonymous) {
+          userCredential = await currentUser.linkWithCredential(credential);
+        } else {
+          userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+        }
       }
 
-      final credential = GoogleAuthProvider.credential(
-  accessToken: googleAuth.accessToken,
-  idToken: googleAuth.idToken,
-);
-
-final currentUser = FirebaseAuth.instance.currentUser;
-
-UserCredential userCredential;
-
-if (currentUser != null && currentUser.isAnonymous) {
-  userCredential =
-      await currentUser.linkWithCredential(credential);
-} else {
-  userCredential =
-      await FirebaseAuth.instance.signInWithCredential(credential);
-}
-      // ✨ NOVO: Guardar a sessão após login bem-sucedido
+      // Guardar a sessão após login bem-sucedido
       if (userCredential.user != null) {
         await SessionPersistenceService.saveSession(userCredential.user!.uid);
         debugPrint('✅ Login bem-sucedido para ${userCredential.user!.email}');
