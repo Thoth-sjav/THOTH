@@ -15,14 +15,18 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:path_provider/path_provider.dart';
-import 'dart:io' show File, Directory, Platform;
+// path_provider e dart:io: não existem na web — importados condicionalmente
+import 'package:path_provider/path_provider.dart'
+    if (dart.library.html) 'package:thoth_app/stubs/path_provider_stub.dart';
+import 'package:thoth_app/utils/platform_file.dart';
 
-import 'package:window_manager/window_manager.dart';
+import 'package:window_manager/window_manager.dart'
+    if (dart.library.html) 'package:thoth_app/stubs/window_manager_stub.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter_background_service/flutter_background_service.dart'
+    if (dart.library.html) 'package:thoth_app/stubs/background_service_stub.dart';
 
 import 'firebase_options.dart';
 
@@ -3447,7 +3451,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
   late final TextEditingController _usernameCtrl;
   late final TextEditingController _descCtrl;
   late final TextEditingController _motivosCtrl;
-  File? _fotoLocal;        // foto nova escolhida localmente
+  XFile? _fotoLocal;        // foto nova escolhida localmente (XFile funciona em web e mobile)
   String _fotoUrl = '';    // URL existente guardada no Firestore
   bool _aCarregarFoto = false;
 
@@ -3478,7 +3482,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
       final picker = ImagePicker();
       final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 75, maxWidth: 512);
       if (picked == null || !mounted) return;
-      setState(() => _fotoLocal = File(picked.path));
+      setState(() => _fotoLocal = picked);
       return;
     }
 
@@ -3527,10 +3531,10 @@ class _TelaPerfilState extends State<TelaPerfil> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: source, imageQuality: 75, maxWidth: 512);
     if (picked == null || !mounted) return;
-    setState(() => _fotoLocal = File(picked.path));
+    setState(() => _fotoLocal = picked);
   }
 
-  Future<String> _uploadFoto(File foto) async {
+  Future<String> _uploadFoto(XFile foto) async {
     // Codificar em base64 e guardar no Firestore (evita Firebase Storage no plano Spark)
     final bytes = await foto.readAsBytes();
     return 'data:image/jpeg;base64,${base64Encode(bytes)}';
@@ -3646,7 +3650,7 @@ class _TelaPerfilState extends State<TelaPerfil> {
                       radius: 60,
                       backgroundColor: azul,
                       backgroundImage: _fotoLocal != null
-                          ? FileImage(_fotoLocal!) as ImageProvider<Object>
+                          ? platformFileImage(_fotoLocal!) as ImageProvider<Object>
                           : (_fotoUrl.isNotEmpty && _fotoUrl.startsWith('data:'))
                               ? MemoryImage(base64Decode(_fotoUrl.split(',').last)) as ImageProvider<Object>
                               : (_fotoUrl.isNotEmpty ? NetworkImage(_fotoUrl) as ImageProvider<Object> : null),
@@ -6103,15 +6107,20 @@ Future<void> _partilharImagem({
     if (byteData == null) return;
     final pngBytes = byteData.buffer.asUint8List();
 
+    if (kIsWeb) {
+      // Na web: download direto via browser
+      await partilharImagemWeb(pngBytes, texto);
+      return;
+    }
+
     if (_isDesktop) {
       // Em desktop: guardar na pasta Downloads
-      final dir = await getDownloadsDirectory() ?? await getTemporaryDirectory();
-      final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
-      await file.writeAsBytes(pngBytes);
+      final dir = await getDownloadsDesktop() ?? await getTempDesktop();
+      final filePath = await criarFicheiroTemp(dir, pngBytes);
       if (context != null && context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Imagem guardada em ${file.path}'),
+            content: Text('Imagem guardada em $filePath'),
             backgroundColor: const Color(0xFF1D81C7),
           ),
         );
@@ -6119,14 +6128,14 @@ Future<void> _partilharImagem({
       return;
     }
 
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/thoth_share_${DateTime.now().millisecondsSinceEpoch}.png');
-    await file.writeAsBytes(pngBytes);
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'image/png')],
-      text: texto,
-      subject: 'THOTH – O meu progresso de estudo',
-    );
+    final filePath = await guardarEPartilhar(pngBytes);
+    if (filePath != null) {
+      await Share.shareXFiles(
+        [XFile(filePath, mimeType: 'image/png')],
+        text: texto,
+        subject: 'THOTH – O meu progresso de estudo',
+      );
+    }
   } catch (e) {
     debugPrint('Erro ao partilhar imagem: $e');
   }
