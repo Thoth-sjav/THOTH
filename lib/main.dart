@@ -587,7 +587,12 @@ class _LoginPageState extends State<LoginPage> {
     try {
       // Web Client ID do Firebase Authentication → Sign-in method → Google → Web client ID
       final GoogleSignIn googleSignIn = GoogleSignIn(
-        serverClientId: '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com',
+        clientId: kIsWeb
+            ? '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com'
+            : null,
+        serverClientId: kIsWeb
+            ? null
+            : '639767112265-bupqhsgfftmn42rkcob8cvk9ntrk2nje.apps.googleusercontent.com',
       );
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
